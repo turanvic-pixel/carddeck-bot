@@ -86,7 +86,24 @@ async def admin_ignore_non_admin_photo(update: Update, context: ContextTypes.DEF
 async def count_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
-    await update.message.reply_text(f"Всего карточек: {storage.count()}.")
+    ids = storage.list_ids()
+    preview = ", ".join(str(i) for i in ids[:30])
+    more = f" и ещё {len(ids) - 30}" if len(ids) > 30 else ""
+    await update.message.reply_text(f"Всего карточек: {storage.count()}.\nНомера: {preview}{more}")
+
+
+async def delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("Формат: /delete <номер карточки>, например /delete 3")
+        return
+    card_id = int(context.args[0])
+    ok = storage.delete_card(card_id)
+    if ok:
+        await update.message.reply_text(f"Карточка #{card_id} удалена. Всего карточек: {storage.count()}.")
+    else:
+        await update.message.reply_text(f"Карточка #{card_id} не найдена.")
 
 
 async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -115,6 +132,7 @@ async def main():
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("count", count_cmd))
+    application.add_handler(CommandHandler("delete", delete_cmd))
     application.add_handler(CommandHandler("whoami", whoami))
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_add_card_photo))
