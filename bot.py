@@ -28,7 +28,7 @@ PORT = int(os.environ.get("PORT", 10000))
 storage = CardStorage(GITHUB_TOKEN, GITHUB_REPO)
 
 DRAW_BUTTON = ReplyKeyboardMarkup(
-    [["🎴 Выбрать карточку"]],
+    [["💎 Открыть жемчужину души"]],
     resize_keyboard=True,
     is_persistent=True,
 )
@@ -116,7 +116,7 @@ async def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("count", count_cmd))
     application.add_handler(CommandHandler("whoami", whoami))
-    application.add_handler(MessageHandler(filters.Regex("^🎴 Выбрать карточку$"), draw_card))
+    application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_add_card_photo))
     application.add_handler(MessageHandler(filters.Document.IMAGE & filters.User(ADMIN_ID), admin_add_card_document))
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_ID), admin_ignore_non_admin_photo))
