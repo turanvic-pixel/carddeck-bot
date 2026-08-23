@@ -52,5 +52,16 @@ class CardStorage:
             return None
         return random.choice(self.cards)
 
+    def delete_card(self, card_id: int) -> bool:
+        before = len(self.cards)
+        self.cards = [c for c in self.cards if c["id"] != card_id]
+        if len(self.cards) == before:
+            return False
+        self._save(f"delete card #{card_id}")
+        return True
+
+    def list_ids(self) -> list:
+        return [c["id"] for c in self.cards]
+
     def count(self) -> int:
         return len(self.cards)
