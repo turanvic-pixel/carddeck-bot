@@ -33,9 +33,10 @@ favorites = FavoritesStore(GITHUB_TOKEN, GITHUB_REPO)
 reminders = ReminderStore(GITHUB_TOKEN, GITHUB_REPO)
 
 REMINDER_BUTTON_TEXT = "⏰ Напоминания"
+FAVORITES_BUTTON_TEXT = "⭐ Избранное"
 
 DRAW_BUTTON = ReplyKeyboardMarkup(
-    [["💎 Открыть жемчужину души"], [REMINDER_BUTTON_TEXT]],
+    [["💎 Открыть жемчужину души"], [FAVORITES_BUTTON_TEXT, REMINDER_BUTTON_TEXT]],
     resize_keyboard=True,
     is_persistent=True,
 )
@@ -295,6 +296,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(favorite_callback, pattern="^fav:"))
     application.add_handler(CallbackQueryHandler(reminder_callback, pattern="^remind_"))
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
+    application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(FAVORITES_BUTTON_TEXT)}$"), favorites_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(REMINDER_BUTTON_TEXT)}$"), reminder_menu_cmd))
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_add_card_photo))
     application.add_handler(MessageHandler(filters.Document.IMAGE & filters.User(ADMIN_ID), admin_add_card_document))
