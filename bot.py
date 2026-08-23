@@ -4,10 +4,9 @@ import os
 
 import aiohttp
 from aiohttp import web
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import (
     Application,
-    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -28,27 +27,29 @@ PORT = int(os.environ.get("PORT", 10000))
 
 storage = CardStorage(GITHUB_TOKEN, GITHUB_REPO)
 
-DRAW_BUTTON = InlineKeyboardMarkup([[InlineKeyboardButton("🎴 Выбрать карточку", callback_data="draw")]])
+DRAW_BUTTON = ReplyKeyboardMarkup(
+    [["🎴 Выбрать карточку"]],
+    resize_keyboard=True,
+    is_persistent=True,
+)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привет! Нажми кнопку, чтобы вытянуть карточку.",
+        "Привет! Кнопка внизу экрана всегда под рукой — жми и вытягивай карточку.",
         reply_markup=DRAW_BUTTON,
     )
 
 
 async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
     card = storage.random_card()
     if card is None:
-        await query.message.reply_text("Пока нет ни одной карточки в коллекции.")
+        await update.message.reply_text("Пока нет ни одной карточки в коллекции.", reply_markup=DRAW_BUTTON)
         return
     if card.get("kind") == "document":
-        await query.message.reply_document(document=card["file_id"], reply_markup=DRAW_BUTTON)
+        await update.message.reply_document(document=card["file_id"], reply_markup=DRAW_BUTTON)
     else:
-        await query.message.reply_photo(photo=card["file_id"], reply_markup=DRAW_BUTTON)
+        await update.message.reply_photo(photo=card["file_id"], reply_markup=DRAW_BUTTON)
 
 
 async def admin_add_card_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -58,7 +59,8 @@ async def admin_add_card_photo(update: Update, context: ContextTypes.DEFAULT_TYP
     new_id = storage.add_card(file_id, kind="photo")
     await update.message.reply_text(
         f"Добавлено! Карточка #{new_id}. Всего карточек: {storage.count()}.\n"
-        f"Если картинка выглядит размытой — отправляй её как «Файл» (без сжатия), а не как «Фото»."
+        f"Если картинка выглядит размытой — отправляй её как «Файл» (без сжатия), а не как «Фото».",
+        reply_markup=DRAW_BUTTON,
     )
 
 
@@ -69,7 +71,10 @@ async def admin_add_card_document(update: Update, context: ContextTypes.DEFAULT_
     if not doc.mime_type or not doc.mime_type.startswith("image/"):
         return
     new_id = storage.add_card(doc.file_id, kind="document")
-    await update.message.reply_text(f"Добавлено (без сжатия)! Карточка #{new_id}. Всего карточек: {storage.count()}.")
+    await update.message.reply_text(
+        f"Добавлено (без сжатия)! Карточка #{new_id}. Всего карточек: {storage.count()}.",
+        reply_markup=DRAW_BUTTON,
+    )
 
 
 async def admin_ignore_non_admin_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -111,7 +116,7 @@ async def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("count", count_cmd))
     application.add_handler(CommandHandler("whoami", whoami))
-    application.add_handler(CallbackQueryHandler(draw_card, pattern="^draw$"))
+    application.add_handler(MessageHandler(filters.Regex("^🎴 Выбрать карточку$"), draw_card))
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_add_card_photo))
     application.add_handler(MessageHandler(filters.Document.IMAGE & filters.User(ADMIN_ID), admin_add_card_document))
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_ID), admin_ignore_non_admin_photo))
