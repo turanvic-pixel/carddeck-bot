@@ -197,14 +197,15 @@ REMINDER_TIME_OPTIONS = ["08:00", "10:00", "12:00", "18:00", "21:00"]
 
 def _reminder_keyboard(user_id: int) -> InlineKeyboardMarkup:
     current = reminders.all().get(str(user_id))
-    row = [
-        InlineKeyboardButton(
-            f"✅ {t}" if t == current else t,
-            callback_data=f"remind_set:{t}",
-        )
-        for t in REMINDER_TIME_OPTIONS
-    ]
-    rows = [row[:3], row[3:]]
+    row = []
+    for t in REMINDER_TIME_OPTIONS:
+        hour, minute = map(int, t.split(":"))
+        msk = f"{(hour + 3) % 24:02d}:{minute:02d}"
+        label = f"{t} ({msk} МСК)"
+        if t == current:
+            label = f"✅ {label}"
+        row.append(InlineKeyboardButton(label, callback_data=f"remind_set:{t}"))
+    rows = [row[:2], row[2:4], row[4:]]
     rows.append([InlineKeyboardButton("❌ Выключить напоминание", callback_data="remind_off")])
     return InlineKeyboardMarkup(rows)
 
@@ -236,7 +237,7 @@ async def reminder_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer(f"Включено на {time_str} UTC")
     await query.edit_message_text(
         f"Готово! Буду присылать карточку каждый день в {time_str} UTC "
-        f"(в Амстердаме сейчас это ~{(hour + 2) % 24:02d}:{minute:02d}).",
+        f"(по Москве это ~{(hour + 3) % 24:02d}:{minute:02d} МСК).",
         reply_markup=_reminder_keyboard(update.effective_user.id),
     )
 
@@ -254,7 +255,7 @@ async def remind_on_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     schedule_reminder(context.application, update.effective_user.id, hour, minute)
     await update.message.reply_text(
         f"Готово! Буду присылать карточку каждый день в {hour:02d}:{minute:02d} по UTC "
-        f"(сейчас в Амстердаме это на 2 часа позже — {(hour + 2) % 24:02d}:{minute:02d})."
+        f"(по Москве это ~{(hour + 3) % 24:02d}:{minute:02d} МСК)."
     )
 
 
