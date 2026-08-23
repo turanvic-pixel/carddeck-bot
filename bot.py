@@ -73,6 +73,14 @@ async def favorite_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer("Сохранено в избранное ❤️" if added else "Уже в избранном")
 
 
+async def unfavorite_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    card_id = int(query.data.split(":")[1])
+    favorites.remove(update.effective_user.id, card_id)
+    await query.answer("Убрано из избранного")
+    await query.edit_message_reply_markup(reply_markup=None)
+
+
 async def favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ids = favorites.list_for_user(update.effective_user.id)
     if not ids:
@@ -83,10 +91,11 @@ async def favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         card = next((c for c in storage.cards if c["id"] == card_id), None)
         if card is None:
             continue
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Убрать из избранного", callback_data=f"unfav:{card_id}")]])
         if card.get("kind") == "document":
-            await update.message.reply_document(document=card["file_id"])
+            await update.message.reply_document(document=card["file_id"], reply_markup=kb)
         else:
-            await update.message.reply_photo(photo=card["file_id"])
+            await update.message.reply_photo(photo=card["file_id"], reply_markup=kb)
     if len(ids) > 20:
         await update.message.reply_text(f"И ещё {len(ids) - 20} в избранном — вызови /favorites ещё раз позже.")
 
@@ -294,6 +303,7 @@ async def main():
     application.add_handler(CommandHandler("remind_on", remind_on_cmd))
     application.add_handler(CommandHandler("remind_off", remind_off_cmd))
     application.add_handler(CallbackQueryHandler(favorite_callback, pattern="^fav:"))
+    application.add_handler(CallbackQueryHandler(unfavorite_callback, pattern="^unfav:"))
     application.add_handler(CallbackQueryHandler(reminder_callback, pattern="^remind_"))
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(FAVORITES_BUTTON_TEXT)}$"), favorites_cmd))
