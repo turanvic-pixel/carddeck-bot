@@ -91,7 +91,7 @@ async def favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         card = next((c for c in storage.cards if c["id"] == card_id), None)
         if card is None:
             continue
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Убрать из избранного", callback_data=f"unfav:{card_id}")]])
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Убрать из избранного", callback_data=f"unfav:{card_id}")]])
         if card.get("kind") == "document":
             await update.message.reply_document(document=card["file_id"], reply_markup=kb)
         else:
