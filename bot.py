@@ -46,10 +46,11 @@ async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if card is None:
         await update.message.reply_text("Пока нет ни одной карточки в коллекции.", reply_markup=DRAW_BUTTON)
         return
+    caption = f"Карточка #{card['id']}" if update.effective_user.id == ADMIN_ID else None
     if card.get("kind") == "document":
-        await update.message.reply_document(document=card["file_id"], reply_markup=DRAW_BUTTON)
+        await update.message.reply_document(document=card["file_id"], caption=caption, reply_markup=DRAW_BUTTON)
     else:
-        await update.message.reply_photo(photo=card["file_id"], reply_markup=DRAW_BUTTON)
+        await update.message.reply_photo(photo=card["file_id"], caption=caption, reply_markup=DRAW_BUTTON)
 
 
 async def admin_add_card_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -92,6 +93,24 @@ async def count_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Всего карточек: {storage.count()}.\nНомера: {preview}{more}")
 
 
+async def card_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("Формат: /card <номер карточки>, например /card 3")
+        return
+    card_id = int(context.args[0])
+    card = next((c for c in storage.cards if c["id"] == card_id), None)
+    if card is None:
+        await update.message.reply_text(f"Карточка #{card_id} не найдена.")
+        return
+    caption = f"Карточка #{card_id}. Чтобы удалить: /delete {card_id}"
+    if card.get("kind") == "document":
+        await update.message.reply_document(document=card["file_id"], caption=caption)
+    else:
+        await update.message.reply_photo(photo=card["file_id"], caption=caption)
+
+
 async def delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -132,6 +151,7 @@ async def main():
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("count", count_cmd))
+    application.add_handler(CommandHandler("card", card_cmd))
     application.add_handler(CommandHandler("delete", delete_cmd))
     application.add_handler(CommandHandler("whoami", whoami))
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
