@@ -200,10 +200,8 @@ def _reminder_keyboard(user_id: int) -> InlineKeyboardMarkup:
     row = []
     for t in REMINDER_TIME_OPTIONS:
         hour, minute = map(int, t.split(":"))
-        msk = f"{(hour + 3) % 24:02d}:{minute:02d}"
-        label = f"{t} ({msk} МСК)"
-        if t == current:
-            label = f"✅ {label}"
+        msk = f"{(hour + 3) % 24:02d}:{minute:02d} МСК"
+        label = f"✅ {msk}" if t == current else msk
         row.append(InlineKeyboardButton(label, callback_data=f"remind_set:{t}"))
     rows = [row[:2], row[2:4], row[4:]]
     rows.append([InlineKeyboardButton("❌ Выключить напоминание", callback_data="remind_off")])
@@ -212,9 +210,10 @@ def _reminder_keyboard(user_id: int) -> InlineKeyboardMarkup:
 
 async def reminder_menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current = reminders.all().get(str(update.effective_user.id))
-    text = "Выбери время ежедневной карточки (по UTC):"
+    text = "Выбери время ежедневной карточки:"
     if current:
-        text += f"\n\nСейчас включено на {current} UTC."
+        hour, minute = map(int, current.split(":"))
+        text += f"\n\nСейчас включено на {(hour + 3) % 24:02d}:{minute:02d} МСК."
     await update.message.reply_text(text, reply_markup=_reminder_keyboard(update.effective_user.id))
 
 
@@ -234,10 +233,9 @@ async def reminder_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hour, minute = map(int, time_str.split(":"))
     reminders.set(update.effective_user.id, time_str)
     schedule_reminder(context.application, update.effective_user.id, hour, minute)
-    await query.answer(f"Включено на {time_str} UTC")
+    await query.answer(f"Включено на {(hour + 3) % 24:02d}:{minute:02d} МСК")
     await query.edit_message_text(
-        f"Готово! Буду присылать карточку каждый день в {time_str} UTC "
-        f"(по Москве это ~{(hour + 3) % 24:02d}:{minute:02d} МСК).",
+        f"Готово! Буду присылать карточку каждый день в {(hour + 3) % 24:02d}:{minute:02d} МСК.",
         reply_markup=_reminder_keyboard(update.effective_user.id),
     )
 
