@@ -1,19 +1,22 @@
 import asyncio
+import datetime
 import logging
 import os
+import re
 
 import aiohttp
 from aiohttp import web
-from telegram import ReplyKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
     filters,
 )
 
-from storage import CardStorage
+from storage import CardStorage, FavoritesStore, ReminderStore
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("carddeck-bot")
@@ -26,6 +29,8 @@ EXTERNAL_URL = os.environ.get("EXTERNAL_URL")  # напр. https://carddeck-bot.
 PORT = int(os.environ.get("PORT", 10000))
 
 storage = CardStorage(GITHUB_TOKEN, GITHUB_REPO)
+favorites = FavoritesStore(GITHUB_TOKEN, GITHUB_REPO)
+reminders = ReminderStore(GITHUB_TOKEN, GITHUB_REPO)
 
 DRAW_BUTTON = ReplyKeyboardMarkup(
     [["💎 Открыть жемчужину души"]],
@@ -41,16 +46,46 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def _fav_keyboard(card_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("❤️ Сохранить", callback_data=f"fav:{card_id}")]])
+
+
 async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     card = storage.next_card_for_user(update.effective_user.id)
     if card is None:
         await update.message.reply_text("Пока нет ни одной карточки в коллекции.", reply_markup=DRAW_BUTTON)
         return
     caption = f"Карточка #{card['id']}" if update.effective_user.id == ADMIN_ID else None
+    kb = _fav_keyboard(card["id"])
     if card.get("kind") == "document":
-        await update.message.reply_document(document=card["file_id"], caption=caption, reply_markup=DRAW_BUTTON)
+        await update.message.reply_document(document=card["file_id"], caption=caption, reply_markup=kb)
     else:
-        await update.message.reply_photo(photo=card["file_id"], caption=caption, reply_markup=DRAW_BUTTON)
+        await update.message.reply_photo(photo=card["file_id"], caption=caption, reply_markup=kb)
+
+
+async def favorite_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    card_id = int(query.data.split(":")[1])
+    added = favorites.add(update.effective_user.id, card_id)
+    await query.answer("Сохранено в избранное ❤️" if added else "Уже в избранном")
+
+
+async def favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ids = favorites.list_for_user(update.effective_user.id)
+    if not ids:
+        await update.message.reply_text("Пока нет сохранённых карточек. Жми ❤️ Сохранить под карточкой.")
+        return
+    await update.message.reply_text(f"Сохранено карточек: {len(ids)}. Отправляю (до 20 за раз)...")
+    for card_id in ids[:20]:
+        card = next((c for c in storage.cards if c["id"] == card_id), None)
+        if card is None:
+            continue
+        if card.get("kind") == "document":
+            await update.message.reply_document(document=card["file_id"])
+        else:
+            await update.message.reply_photo(photo=card["file_id"])
+    if len(ids) > 20:
+        await update.message.reply_text(f"И ещё {len(ids) - 20} в избранном — вызови /favorites ещё раз позже.")
 
 
 async def admin_add_card_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -129,6 +164,56 @@ async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Твой Telegram ID: {update.effective_user.id}")
 
 
+def schedule_reminder(application: Application, user_id: int, hour: int, minute: int):
+    for job in application.job_queue.get_jobs_by_name(str(user_id)):
+        job.schedule_removal()
+    application.job_queue.run_daily(
+        send_daily_card,
+        time=datetime.time(hour=hour, minute=minute, tzinfo=datetime.timezone.utc),
+        chat_id=user_id,
+        name=str(user_id),
+    )
+
+
+async def send_daily_card(context: ContextTypes.DEFAULT_TYPE):
+    chat_id = context.job.chat_id
+    card = storage.next_card_for_user(chat_id)
+    if card is None:
+        return
+    kb = _fav_keyboard(card["id"])
+    if card.get("kind") == "document":
+        await context.bot.send_document(chat_id=chat_id, document=card["file_id"], caption="🌅 Карточка дня", reply_markup=kb)
+    else:
+        await context.bot.send_photo(chat_id=chat_id, photo=card["file_id"], caption="🌅 Карточка дня", reply_markup=kb)
+
+
+TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+async def remind_on_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Формат: /remind_on 09:00 (время по UTC).")
+        return
+    m = TIME_RE.match(context.args[0])
+    if not m:
+        await update.message.reply_text("Не понял время. Формат ЧЧ:ММ, например /remind_on 09:00 (UTC).")
+        return
+    hour, minute = int(m.group(1)), int(m.group(2))
+    reminders.set(update.effective_user.id, f"{hour:02d}:{minute:02d}")
+    schedule_reminder(context.application, update.effective_user.id, hour, minute)
+    await update.message.reply_text(
+        f"Готово! Буду присылать карточку каждый день в {hour:02d}:{minute:02d} по UTC "
+        f"(сейчас в Амстердаме это на 2 часа позже — {(hour + 2) % 24:02d}:{minute:02d})."
+    )
+
+
+async def remind_off_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ok = reminders.remove(update.effective_user.id)
+    for job in context.application.job_queue.get_jobs_by_name(str(update.effective_user.id)):
+        job.schedule_removal()
+    await update.message.reply_text("Напоминания отключены." if ok else "У тебя не было включённых напоминаний.")
+
+
 async def health(request):
     return web.Response(text="OK")
 
@@ -154,11 +239,19 @@ async def main():
     application.add_handler(CommandHandler("card", card_cmd))
     application.add_handler(CommandHandler("delete", delete_cmd))
     application.add_handler(CommandHandler("whoami", whoami))
+    application.add_handler(CommandHandler("favorites", favorites_cmd))
+    application.add_handler(CommandHandler("remind_on", remind_on_cmd))
+    application.add_handler(CommandHandler("remind_off", remind_off_cmd))
+    application.add_handler(CallbackQueryHandler(favorite_callback, pattern="^fav:"))
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_add_card_photo))
     application.add_handler(MessageHandler(filters.Document.IMAGE & filters.User(ADMIN_ID), admin_add_card_document))
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_ID), admin_ignore_non_admin_photo))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
+
+    for uid_str, time_str in reminders.all().items():
+        hour, minute = map(int, time_str.split(":"))
+        schedule_reminder(application, int(uid_str), hour, minute)
 
     web_app = web.Application()
     web_app.router.add_get("/", health)
