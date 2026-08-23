@@ -44,6 +44,11 @@
       "id": 11,
       "file_id": "AgACtest_photo",
       "kind": "photo"
+    },
+    {
+      "id": 12,
+      "file_id": "BQACtest_doc",
+      "kind": "document"
     }
   ]
 }
