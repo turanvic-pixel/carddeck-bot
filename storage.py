@@ -41,9 +41,9 @@ class CardStorage:
             result = self.repo.create_file(self.file_path, commit_message, content)
         self._sha = result["content"].sha
 
-    def add_card(self, file_id: str, text: str) -> int:
+    def add_card(self, file_id: str) -> int:
         new_id = max((c["id"] for c in self.cards), default=0) + 1
-        self.cards.append({"id": new_id, "file_id": file_id, "text": text})
+        self.cards.append({"id": new_id, "file_id": file_id})
         self._save(f"add card #{new_id}")
         return new_id
 
