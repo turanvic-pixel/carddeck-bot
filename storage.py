@@ -124,6 +124,16 @@ class FavoritesStore:
     def list_for_user(self, user_id: int) -> list:
         return self.data.get(str(user_id), [])
 
+    def remove(self, user_id: int, card_id: int) -> bool:
+        key = str(user_id)
+        favs = self.data.get(key, [])
+        if card_id not in favs:
+            return False
+        favs.remove(card_id)
+        self.data[key] = favs
+        self._save(f"favorite remove user={user_id} card={card_id}")
+        return True
+
 
 class ReminderStore:
     """Кто и в какое время (UTC) хочет получать карточку дня — reminders.json в GitHub."""
