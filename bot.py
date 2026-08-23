@@ -32,8 +32,10 @@ storage = CardStorage(GITHUB_TOKEN, GITHUB_REPO)
 favorites = FavoritesStore(GITHUB_TOKEN, GITHUB_REPO)
 reminders = ReminderStore(GITHUB_TOKEN, GITHUB_REPO)
 
+REMINDER_BUTTON_TEXT = "⏰ Напоминания"
+
 DRAW_BUTTON = ReplyKeyboardMarkup(
-    [["💎 Открыть жемчужину души"]],
+    [["💎 Открыть жемчужину души"], [REMINDER_BUTTON_TEXT]],
     resize_keyboard=True,
     is_persistent=True,
 )
@@ -190,6 +192,55 @@ async def send_daily_card(context: ContextTypes.DEFAULT_TYPE):
 TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
+REMINDER_TIME_OPTIONS = ["08:00", "10:00", "12:00", "18:00", "21:00"]
+
+
+def _reminder_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    current = reminders.all().get(str(user_id))
+    row = [
+        InlineKeyboardButton(
+            f"✅ {t}" if t == current else t,
+            callback_data=f"remind_set:{t}",
+        )
+        for t in REMINDER_TIME_OPTIONS
+    ]
+    rows = [row[:3], row[3:]]
+    rows.append([InlineKeyboardButton("❌ Выключить напоминание", callback_data="remind_off")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def reminder_menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    current = reminders.all().get(str(update.effective_user.id))
+    text = "Выбери время ежедневной карточки (по UTC):"
+    if current:
+        text += f"\n\nСейчас включено на {current} UTC."
+    await update.message.reply_text(text, reply_markup=_reminder_keyboard(update.effective_user.id))
+
+
+async def reminder_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query.data == "remind_off":
+        ok = reminders.remove(update.effective_user.id)
+        for job in context.application.job_queue.get_jobs_by_name(str(update.effective_user.id)):
+            job.schedule_removal()
+        await query.answer("Напоминание выключено" if ok else "Напоминание и так было выключено")
+        await query.edit_message_text(
+            "Напоминание выключено.", reply_markup=_reminder_keyboard(update.effective_user.id)
+        )
+        return
+
+    _, time_str = query.data.split(":", 1)
+    hour, minute = map(int, time_str.split(":"))
+    reminders.set(update.effective_user.id, time_str)
+    schedule_reminder(context.application, update.effective_user.id, hour, minute)
+    await query.answer(f"Включено на {time_str} UTC")
+    await query.edit_message_text(
+        f"Готово! Буду присылать карточку каждый день в {time_str} UTC "
+        f"(в Амстердаме сейчас это ~{(hour + 2) % 24:02d}:{minute:02d}).",
+        reply_markup=_reminder_keyboard(update.effective_user.id),
+    )
+
+
 async def remind_on_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("Формат: /remind_on 09:00 (время по UTC).")
@@ -243,7 +294,9 @@ async def main():
     application.add_handler(CommandHandler("remind_on", remind_on_cmd))
     application.add_handler(CommandHandler("remind_off", remind_off_cmd))
     application.add_handler(CallbackQueryHandler(favorite_callback, pattern="^fav:"))
+    application.add_handler(CallbackQueryHandler(reminder_callback, pattern="^remind_"))
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
+    application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(REMINDER_BUTTON_TEXT)}$"), reminder_menu_cmd))
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_add_card_photo))
     application.add_handler(MessageHandler(filters.Document.IMAGE & filters.User(ADMIN_ID), admin_add_card_document))
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_ID), admin_ignore_non_admin_photo))
