@@ -19,6 +19,7 @@ class CardStorage:
         self.file_path = file_path
         self.cards = []
         self._sha = None
+        self._decks = {}
         self._load()
 
     def _load(self):
@@ -51,6 +52,22 @@ class CardStorage:
         if not self.cards:
             return None
         return random.choice(self.cards)
+
+    def next_card_for_user(self, user_id: int):
+        """Тянет карточку без повторов, пока не покажет все — потом тасует заново."""
+        if not self.cards:
+            return None
+        deck = self._decks.get(user_id)
+        if not deck:
+            deck = [c["id"] for c in self.cards]
+            random.shuffle(deck)
+            self._decks[user_id] = deck
+        card_id = deck.pop()
+        card = next((c for c in self.cards if c["id"] == card_id), None)
+        if card is None:
+            # карточку успели удалить между тасовками — тянем следующую
+            return self.next_card_for_user(user_id)
+        return card
 
     def delete_card(self, card_id: int) -> bool:
         before = len(self.cards)
