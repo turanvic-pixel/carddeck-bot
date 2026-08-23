@@ -47,7 +47,6 @@ async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await query.message.reply_photo(
         photo=card["file_id"],
-        caption=card["text"],
         reply_markup=DRAW_BUTTON,
     )
 
@@ -55,14 +54,8 @@ async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_add_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
-    if not update.message.caption:
-        await update.message.reply_text(
-            "Пришли фото ещё раз, но с подписью (текстом карточки) прямо в этом же сообщении."
-        )
-        return
     file_id = update.message.photo[-1].file_id
-    text = update.message.caption
-    new_id = storage.add_card(file_id, text)
+    new_id = storage.add_card(file_id)
     await update.message.reply_text(f"Добавлено! Карточка #{new_id}. Всего карточек: {storage.count()}.")
 
 
