@@ -45,18 +45,31 @@ async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if card is None:
         await query.message.reply_text("Пока нет ни одной карточки в коллекции.")
         return
-    await query.message.reply_photo(
-        photo=card["file_id"],
-        reply_markup=DRAW_BUTTON,
-    )
+    if card.get("kind") == "document":
+        await query.message.reply_document(document=card["file_id"], reply_markup=DRAW_BUTTON)
+    else:
+        await query.message.reply_photo(photo=card["file_id"], reply_markup=DRAW_BUTTON)
 
 
-async def admin_add_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_add_card_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     file_id = update.message.photo[-1].file_id
-    new_id = storage.add_card(file_id)
-    await update.message.reply_text(f"Добавлено! Карточка #{new_id}. Всего карточек: {storage.count()}.")
+    new_id = storage.add_card(file_id, kind="photo")
+    await update.message.reply_text(
+        f"Добавлено! Карточка #{new_id}. Всего карточек: {storage.count()}.\n"
+        f"Если картинка выглядит размытой — отправляй её как «Файл» (без сжатия), а не как «Фото»."
+    )
+
+
+async def admin_add_card_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    doc = update.message.document
+    if not doc.mime_type or not doc.mime_type.startswith("image/"):
+        return
+    new_id = storage.add_card(doc.file_id, kind="document")
+    await update.message.reply_text(f"Добавлено (без сжатия)! Карточка #{new_id}. Всего карточек: {storage.count()}.")
 
 
 async def admin_ignore_non_admin_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -99,7 +112,8 @@ async def main():
     application.add_handler(CommandHandler("count", count_cmd))
     application.add_handler(CommandHandler("whoami", whoami))
     application.add_handler(CallbackQueryHandler(draw_card, pattern="^draw$"))
-    application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_add_card))
+    application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_add_card_photo))
+    application.add_handler(MessageHandler(filters.Document.IMAGE & filters.User(ADMIN_ID), admin_add_card_document))
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_ID), admin_ignore_non_admin_photo))
 
     web_app = web.Application()
