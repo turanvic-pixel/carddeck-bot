@@ -115,6 +115,7 @@ async def main():
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_add_card_photo))
     application.add_handler(MessageHandler(filters.Document.IMAGE & filters.User(ADMIN_ID), admin_add_card_document))
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_ID), admin_ignore_non_admin_photo))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
 
     web_app = web.Application()
     web_app.router.add_get("/", health)
