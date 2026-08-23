@@ -42,7 +42,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    card = storage.random_card()
+    card = storage.next_card_for_user(update.effective_user.id)
     if card is None:
         await update.message.reply_text("Пока нет ни одной карточки в коллекции.", reply_markup=DRAW_BUTTON)
         return
