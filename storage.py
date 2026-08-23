@@ -82,3 +82,88 @@ class CardStorage:
 
     def count(self) -> int:
         return len(self.cards)
+
+
+class FavoritesStore:
+    """Избранные карточки пользователей — favorites.json в GitHub."""
+
+    def __init__(self, github_token: str, repo_name: str, file_path: str = "favorites.json"):
+        self.repo = Github(auth=Auth.Token(github_token)).get_user().get_repo(repo_name)
+        self.file_path = file_path
+        self.data = {}  # str(user_id) -> [card_id, ...]
+        self._sha = None
+        self._load()
+
+    def _load(self):
+        try:
+            f = self.repo.get_contents(self.file_path)
+            self.data = json.loads(f.decoded_content.decode())
+            self._sha = f.sha
+        except Exception as e:
+            logger.warning("favorites.json не найден, стартуем с пустого: %s", e)
+            self.data = {}
+            self._sha = None
+
+    def _save(self, commit_message: str):
+        content = json.dumps(self.data, ensure_ascii=False, indent=2)
+        if self._sha:
+            result = self.repo.update_file(self.file_path, commit_message, content, self._sha)
+        else:
+            result = self.repo.create_file(self.file_path, commit_message, content)
+        self._sha = result["content"].sha
+
+    def add(self, user_id: int, card_id: int) -> bool:
+        key = str(user_id)
+        favs = self.data.setdefault(key, [])
+        if card_id in favs:
+            return False
+        favs.append(card_id)
+        self._save(f"favorite add user={user_id} card={card_id}")
+        return True
+
+    def list_for_user(self, user_id: int) -> list:
+        return self.data.get(str(user_id), [])
+
+
+class ReminderStore:
+    """Кто и в какое время (UTC) хочет получать карточку дня — reminders.json в GitHub."""
+
+    def __init__(self, github_token: str, repo_name: str, file_path: str = "reminders.json"):
+        self.repo = Github(auth=Auth.Token(github_token)).get_user().get_repo(repo_name)
+        self.file_path = file_path
+        self.data = {}  # str(user_id) -> "HH:MM"
+        self._sha = None
+        self._load()
+
+    def _load(self):
+        try:
+            f = self.repo.get_contents(self.file_path)
+            self.data = json.loads(f.decoded_content.decode())
+            self._sha = f.sha
+        except Exception as e:
+            logger.warning("reminders.json не найден, стартуем с пустого: %s", e)
+            self.data = {}
+            self._sha = None
+
+    def _save(self, commit_message: str):
+        content = json.dumps(self.data, ensure_ascii=False, indent=2)
+        if self._sha:
+            result = self.repo.update_file(self.file_path, commit_message, content, self._sha)
+        else:
+            result = self.repo.create_file(self.file_path, commit_message, content)
+        self._sha = result["content"].sha
+
+    def set(self, user_id: int, time_str: str):
+        self.data[str(user_id)] = time_str
+        self._save(f"reminder set user={user_id} time={time_str}")
+
+    def remove(self, user_id: int) -> bool:
+        key = str(user_id)
+        if key not in self.data:
+            return False
+        del self.data[key]
+        self._save(f"reminder remove user={user_id}")
+        return True
+
+    def all(self) -> dict:
+        return dict(self.data)
