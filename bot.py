@@ -36,12 +36,55 @@ reminders = ReminderStore(GITHUB_TOKEN, GITHUB_REPO)
 
 REMINDER_BUTTON_TEXT = "⏰ Напоминания"
 FAVORITES_BUTTON_TEXT = "⭐ Избранное"
+STATS_BUTTON_TEXT = "📊 Статистика"
 
 DRAW_BUTTON = ReplyKeyboardMarkup(
-    [["💎 Открыть жемчужину души"], [FAVORITES_BUTTON_TEXT, REMINDER_BUTTON_TEXT]],
+    [
+        ["💎 Открыть жемчужину души"],
+        [FAVORITES_BUTTON_TEXT, STATS_BUTTON_TEXT],
+        [REMINDER_BUTTON_TEXT],
+    ],
     resize_keyboard=True,
     is_persistent=True,
 )
+
+# статистика просмотров — в памяти процесса (как и очередь карточек), сбрасывается при рестарте Render
+_stats_data: dict[int, dict[str, int]] = {}
+
+
+def record_view(user_id: int):
+    today = datetime.date.today().isoformat()
+    user_stats = _stats_data.setdefault(user_id, {})
+    user_stats[today] = user_stats.get(today, 0) + 1
+
+
+def get_stats(user_id: int):
+    today = datetime.date.today()
+    user_stats = _stats_data.get(user_id, {})
+    total = sum(user_stats.values())
+    day = user_stats.get(today.isoformat(), 0)
+    week_start = today - datetime.timedelta(days=today.weekday())
+    week = sum(
+        v for d, v in user_stats.items()
+        if week_start <= datetime.date.fromisoformat(d) <= today
+    )
+    month = sum(
+        v for d, v in user_stats.items()
+        if datetime.date.fromisoformat(d).year == today.year
+        and datetime.date.fromisoformat(d).month == today.month
+    )
+    return total, day, week, month
+
+
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    total, day, week, month = get_stats(update.effective_user.id)
+    await update.message.reply_text(
+        "📊 Твоя статистика просмотров:\n\n"
+        f"Всего: {total}\n"
+        f"За день: {day}\n"
+        f"За неделю: {week}\n"
+        f"За месяц: {month}"
+    )
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -68,6 +111,7 @@ async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if card is None:
         await update.message.reply_text("Пока нет ни одной карточки в коллекции.", reply_markup=DRAW_BUTTON)
         return
+    record_view(update.effective_user.id)
     caption = f"Карточка #{card['id']}" if update.effective_user.id == ADMIN_ID else None
     kb = _fav_keyboard(card["id"])
     if card.get("kind") == "document":
@@ -249,6 +293,7 @@ async def send_daily_card(context: ContextTypes.DEFAULT_TYPE):
     card = storage.next_card_for_user(chat_id)
     if card is None:
         return
+    record_view(chat_id)
     kb = _fav_keyboard(card["id"])
     if card.get("kind") == "document":
         await context.bot.send_document(chat_id=chat_id, document=card["file_id"], caption="🌅 Карточка дня", reply_markup=kb)
@@ -365,6 +410,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(reminder_callback, pattern="^remind_"))
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(FAVORITES_BUTTON_TEXT)}$"), favorites_cmd))
+    application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(STATS_BUTTON_TEXT)}$"), stats_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(REMINDER_BUTTON_TEXT)}$"), reminder_menu_cmd))
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_add_card_photo))
     application.add_handler(MessageHandler(filters.Document.IMAGE & filters.User(ADMIN_ID), admin_add_card_document))
