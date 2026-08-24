@@ -18,7 +18,7 @@ from telegram.ext import (
     filters,
 )
 
-from storage import CardStorage, FavoritesStore, ReminderStore
+from storage import CardStorage, FavoritesStore, MetaStore, ReminderStore, UserStore
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("carddeck-bot")
@@ -33,6 +33,13 @@ PORT = int(os.environ.get("PORT", 10000))
 storage = CardStorage(GITHUB_TOKEN, GITHUB_REPO)
 favorites = FavoritesStore(GITHUB_TOKEN, GITHUB_REPO)
 reminders = ReminderStore(GITHUB_TOKEN, GITHUB_REPO)
+users = UserStore(GITHUB_TOKEN, GITHUB_REPO)
+meta = MetaStore(GITHUB_TOKEN, GITHUB_REPO)
+
+# Меняй эту строку при каждом изменении набора кнопок внизу экрана —
+# бот сам один раз попросит всех известных пользователей написать любое слово,
+# чтобы у них обновилась клавиатура.
+KEYBOARD_VERSION = "v5-favorites-stats-reminders"
 
 REMINDER_BUTTON_TEXT = "⏰ Напоминания"
 FAVORITES_BUTTON_TEXT = "⭐ Избранное"
@@ -86,6 +93,21 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"За месяц: {month}\n\n"
         f"Карточек в боте всего: {storage.count()}"
     )
+
+
+async def track_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user:
+        users.add(update.effective_user.id)
+
+
+async def broadcast_keyboard_update(application: Application):
+    text = "У бота обновились кнопки! Напиши любое слово, чтобы увидеть новое меню 🙂"
+    for uid in users.all():
+        try:
+            await application.bot.send_message(chat_id=uid, text=text)
+        except Exception as e:
+            logger.warning("Не удалось уведомить пользователя %s: %s", uid, e)
+        await asyncio.sleep(0.05)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -397,6 +419,7 @@ async def self_ping():
 
 async def main():
     application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(MessageHandler(filters.ALL, track_user), group=-1)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("count", count_cmd))
     application.add_handler(CommandHandler("card", card_cmd))
@@ -434,6 +457,9 @@ async def main():
 
     async with application:
         await application.start()
+        if meta.get("keyboard_version") != KEYBOARD_VERSION:
+            asyncio.create_task(broadcast_keyboard_update(application))
+            meta.set("keyboard_version", KEYBOARD_VERSION)
         await application.updater.start_polling(drop_pending_updates=True)
         logger.info("Бот запущен, ждём сообщений...")
         await asyncio.Event().wait()
