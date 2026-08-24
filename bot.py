@@ -1,8 +1,10 @@
 import asyncio
 import datetime
+import io
 import logging
 import os
 import re
+import zipfile
 
 import aiohttp
 from aiohttp import web
@@ -184,6 +186,53 @@ async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Твой Telegram ID: {update.effective_user.id}")
 
 
+MAX_ZIP_BYTES = 40 * 1024 * 1024  # запас от лимита Telegram в 50 МБ на файл
+
+
+async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not storage.cards:
+        await update.message.reply_text("Карточек пока нет.")
+        return
+    await update.message.reply_text(f"Начинаю выгрузку {storage.count()} карточек, это может занять время...")
+
+    buf = io.BytesIO()
+    zf = zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED)
+    part = 1
+    count_in_zip = 0
+    failed = []
+
+    for card in storage.cards:
+        try:
+            tg_file = await context.bot.get_file(card["file_id"])
+            data = await tg_file.download_as_bytearray()
+        except Exception as e:
+            logger.warning("Не удалось скачать карточку #%s: %s", card["id"], e)
+            failed.append(card["id"])
+            continue
+        zf.writestr(f"card_{card['id']:04d}.jpg", bytes(data))
+        count_in_zip += 1
+        if buf.tell() > MAX_ZIP_BYTES:
+            zf.close()
+            buf.seek(0)
+            await update.message.reply_document(document=buf, filename=f"cards_part{part}.zip")
+            part += 1
+            buf = io.BytesIO()
+            zf = zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED)
+            count_in_zip = 0
+
+    zf.close()
+    if count_in_zip > 0:
+        buf.seek(0)
+        await update.message.reply_document(document=buf, filename=f"cards_part{part}.zip")
+
+    msg = "Готово! Все карточки отправлены архивом(-ами)."
+    if failed:
+        msg += f"\nНе удалось скачать: {failed}"
+    await update.message.reply_text(msg)
+
+
 def schedule_reminder(application: Application, user_id: int, hour: int, minute: int):
     for job in application.job_queue.get_jobs_by_name(str(user_id)):
         job.schedule_removal()
@@ -307,6 +356,7 @@ async def main():
     application.add_handler(CommandHandler("card", card_cmd))
     application.add_handler(CommandHandler("delete", delete_cmd))
     application.add_handler(CommandHandler("whoami", whoami))
+    application.add_handler(CommandHandler("export", export_cmd))
     application.add_handler(CommandHandler("favorites", favorites_cmd))
     application.add_handler(CommandHandler("remind_on", remind_on_cmd))
     application.add_handler(CommandHandler("remind_off", remind_off_cmd))
