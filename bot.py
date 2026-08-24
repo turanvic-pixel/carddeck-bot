@@ -8,6 +8,7 @@ import zipfile
 
 import aiohttp
 from aiohttp import web
+from PIL import Image
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -177,14 +178,29 @@ async def favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"И ещё {len(ids) - 20} в избранном — вызови /favorites ещё раз позже.")
 
 
+MAX_IMAGE_DIMENSION = 2000
+JPEG_QUALITY = 90
+
+
+def optimize_image_bytes(raw_bytes: bytes) -> bytes:
+    """Мягкое сжатие: сохраняет резкость текста лучше, чем стандартное сжатие Telegram-фото,
+    и при этом отправляется как «Фото» — без плашки с именем файла."""
+    img = Image.open(io.BytesIO(raw_bytes))
+    img = img.convert("RGB")
+    if max(img.size) > MAX_IMAGE_DIMENSION:
+        img.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION), Image.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    return out.getvalue()
+
+
 async def admin_add_card_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     file_id = update.message.photo[-1].file_id
     new_id = storage.add_card(file_id, kind="photo")
     await update.message.reply_text(
-        f"Добавлено! Карточка #{new_id}. Всего карточек: {storage.count()}.\n"
-        f"Если картинка выглядит размытой — отправляй её как «Файл» (без сжатия), а не как «Фото».",
+        f"Добавлено! Карточка #{new_id}. Всего карточек: {storage.count()}.",
         reply_markup=DRAW_BUTTON,
     )
 
@@ -195,11 +211,51 @@ async def admin_add_card_document(update: Update, context: ContextTypes.DEFAULT_
     doc = update.message.document
     if not doc.mime_type or not doc.mime_type.startswith("image/"):
         return
-    new_id = storage.add_card(doc.file_id, kind="document")
+    tg_file = await context.bot.get_file(doc.file_id)
+    raw = await tg_file.download_as_bytearray()
+    try:
+        optimized = optimize_image_bytes(bytes(raw))
+    except Exception as e:
+        logger.warning("Не удалось обработать картинку: %s", e)
+        await update.message.reply_text("Не получилось обработать эту картинку, попробуй другой файл.")
+        return
+    sent = await update.message.reply_photo(photo=io.BytesIO(optimized))
+    photo_file_id = sent.photo[-1].file_id
+    new_id = storage.add_card(photo_file_id, kind="photo")
     await update.message.reply_text(
-        f"Добавлено (без сжатия)! Карточка #{new_id}. Всего карточек: {storage.count()}.",
+        f"Добавлено (оптимизировано)! Карточка #{new_id}. Всего карточек: {storage.count()}.",
         reply_markup=DRAW_BUTTON,
     )
+
+
+async def reprocess_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    doc_cards = [c for c in storage.cards if c.get("kind") == "document"]
+    if not doc_cards:
+        await update.message.reply_text("Все карточки уже в едином формате, пересобирать нечего.")
+        return
+    await update.message.reply_text(f"Пересобираю {len(doc_cards)} карточек, это может занять время...")
+    fixed = 0
+    failed = []
+    for card in doc_cards:
+        try:
+            tg_file = await context.bot.get_file(card["file_id"])
+            raw = await tg_file.download_as_bytearray()
+            optimized = optimize_image_bytes(bytes(raw))
+            sent = await context.bot.send_photo(chat_id=ADMIN_ID, photo=io.BytesIO(optimized))
+            card["file_id"] = sent.photo[-1].file_id
+            card["kind"] = "photo"
+            fixed += 1
+        except Exception as e:
+            logger.warning("Не удалось пересобрать карточку #%s: %s", card["id"], e)
+            failed.append(card["id"])
+    if fixed > 0:
+        storage.persist(f"reprocess {fixed} document-cards into optimized photo cards")
+    msg = f"Готово! Пересобрано: {fixed}."
+    if failed:
+        msg += f" Не получилось: {failed}."
+    await update.message.reply_text(msg, reply_markup=DRAW_BUTTON)
 
 
 async def admin_ignore_non_admin_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -426,6 +482,7 @@ async def main():
     application.add_handler(CommandHandler("delete", delete_cmd))
     application.add_handler(CommandHandler("whoami", whoami))
     application.add_handler(CommandHandler("export", export_cmd))
+    application.add_handler(CommandHandler("reprocess", reprocess_cmd))
     application.add_handler(CommandHandler("favorites", favorites_cmd))
     application.add_handler(CommandHandler("remind_on", remind_on_cmd))
     application.add_handler(CommandHandler("remind_off", remind_off_cmd))
