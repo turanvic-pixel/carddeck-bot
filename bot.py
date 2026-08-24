@@ -83,7 +83,8 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Всего: {total}\n"
         f"За день: {day}\n"
         f"За неделю: {week}\n"
-        f"За месяц: {month}"
+        f"За месяц: {month}\n\n"
+        f"Карточек в боте всего: {storage.count()}"
     )
 
 
