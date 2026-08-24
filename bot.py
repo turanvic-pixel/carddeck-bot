@@ -43,10 +43,18 @@ DRAW_BUTTON = ReplyKeyboardMarkup(
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+    msg = await update.message.reply_text(
         "Привет! Кнопка внизу экрана всегда под рукой — жми и вытягивай карточку.",
         reply_markup=DRAW_BUTTON,
     )
+    try:
+        chat = await context.bot.get_chat(update.effective_chat.id)
+        if chat.pinned_message is None:
+            await context.bot.pin_chat_message(
+                chat_id=update.effective_chat.id, message_id=msg.message_id, disable_notification=True
+            )
+    except Exception as e:
+        logger.warning("Не удалось закрепить сообщение: %s", e)
 
 
 def _fav_keyboard(card_id: int) -> InlineKeyboardMarkup:
