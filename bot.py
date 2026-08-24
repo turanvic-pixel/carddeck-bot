@@ -9,6 +9,7 @@ import zipfile
 import aiohttp
 from aiohttp import web
 from PIL import Image
+import imagehash
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -194,11 +195,29 @@ def optimize_image_bytes(raw_bytes: bytes) -> bytes:
     return out.getvalue()
 
 
+def compute_phash(raw_bytes: bytes) -> str | None:
+    try:
+        img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+        return str(imagehash.phash(img))
+    except Exception as e:
+        logger.warning("Не удалось посчитать хэш картинки: %s", e)
+        return None
+
+
 async def admin_add_card_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
-    file_id = update.message.photo[-1].file_id
-    new_id = storage.add_card(file_id, kind="photo")
+    photo = update.message.photo[-1]
+    tg_file = await context.bot.get_file(photo.file_id)
+    raw = await tg_file.download_as_bytearray()
+    phash = compute_phash(bytes(raw))
+    dup = storage.find_duplicate(phash)
+    if dup:
+        await update.message.reply_text(
+            f"Такая карточка уже есть — #{dup['id']}. Не добавляю дубликат.", reply_markup=DRAW_BUTTON
+        )
+        return
+    new_id = storage.add_card(photo.file_id, kind="photo", phash=phash)
     await update.message.reply_text(
         f"Добавлено! Карточка #{new_id}. Всего карточек: {storage.count()}.",
         reply_markup=DRAW_BUTTON,
@@ -213,6 +232,13 @@ async def admin_add_card_document(update: Update, context: ContextTypes.DEFAULT_
         return
     tg_file = await context.bot.get_file(doc.file_id)
     raw = await tg_file.download_as_bytearray()
+    phash = compute_phash(bytes(raw))
+    dup = storage.find_duplicate(phash)
+    if dup:
+        await update.message.reply_text(
+            f"Такая карточка уже есть — #{dup['id']}. Не добавляю дубликат.", reply_markup=DRAW_BUTTON
+        )
+        return
     try:
         optimized = optimize_image_bytes(bytes(raw))
     except Exception as e:
@@ -221,7 +247,7 @@ async def admin_add_card_document(update: Update, context: ContextTypes.DEFAULT_
         return
     sent = await update.message.reply_photo(photo=io.BytesIO(optimized))
     photo_file_id = sent.photo[-1].file_id
-    new_id = storage.add_card(photo_file_id, kind="photo")
+    new_id = storage.add_card(photo_file_id, kind="photo", phash=phash)
     await update.message.reply_text(
         f"Добавлено (оптимизировано)! Карточка #{new_id}. Всего карточек: {storage.count()}.",
         reply_markup=DRAW_BUTTON,
@@ -242,10 +268,13 @@ async def reprocess_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             tg_file = await context.bot.get_file(card["file_id"])
             raw = await tg_file.download_as_bytearray()
+            phash = compute_phash(bytes(raw))
             optimized = optimize_image_bytes(bytes(raw))
             sent = await context.bot.send_photo(chat_id=ADMIN_ID, photo=io.BytesIO(optimized))
             card["file_id"] = sent.photo[-1].file_id
             card["kind"] = "photo"
+            if phash:
+                card["phash"] = phash
             fixed += 1
         except Exception as e:
             logger.warning("Не удалось пересобрать карточку #%s: %s", card["id"], e)
@@ -253,6 +282,37 @@ async def reprocess_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if fixed > 0:
         storage.persist(f"reprocess {fixed} document-cards into optimized photo cards")
     msg = f"Готово! Пересобрано: {fixed}."
+    if failed:
+        msg += f" Не получилось: {failed}."
+    await update.message.reply_text(msg, reply_markup=DRAW_BUTTON)
+
+
+async def hash_missing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    missing = [c for c in storage.cards if not c.get("phash")]
+    if not missing:
+        await update.message.reply_text("У всех карточек уже есть хэш для проверки дублей.")
+        return
+    await update.message.reply_text(f"Считаю хэш для {len(missing)} карточек...")
+    fixed = 0
+    failed = []
+    for card in missing:
+        try:
+            tg_file = await context.bot.get_file(card["file_id"])
+            raw = await tg_file.download_as_bytearray()
+            phash = compute_phash(bytes(raw))
+            if phash:
+                card["phash"] = phash
+                fixed += 1
+            else:
+                failed.append(card["id"])
+        except Exception as e:
+            logger.warning("Не удалось посчитать хэш для карточки #%s: %s", card["id"], e)
+            failed.append(card["id"])
+    if fixed > 0:
+        storage.persist(f"backfill phash for {fixed} cards")
+    msg = f"Готово! Хэш посчитан для {fixed} карточек."
     if failed:
         msg += f" Не получилось: {failed}."
     await update.message.reply_text(msg, reply_markup=DRAW_BUTTON)
@@ -483,6 +543,7 @@ async def main():
     application.add_handler(CommandHandler("whoami", whoami))
     application.add_handler(CommandHandler("export", export_cmd))
     application.add_handler(CommandHandler("reprocess", reprocess_cmd))
+    application.add_handler(CommandHandler("hash_missing", hash_missing_cmd))
     application.add_handler(CommandHandler("favorites", favorites_cmd))
     application.add_handler(CommandHandler("remind_on", remind_on_cmd))
     application.add_handler(CommandHandler("remind_off", remind_off_cmd))
