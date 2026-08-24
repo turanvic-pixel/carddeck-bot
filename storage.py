@@ -2,6 +2,7 @@ import json
 import random
 import logging
 
+import imagehash
 from github import Github, Auth
 
 logger = logging.getLogger(__name__)
@@ -46,11 +47,33 @@ class CardStorage:
         """Сохранить текущее состояние self.cards (например, после ручного изменения file_id/kind)."""
         self._save(commit_message)
 
-    def add_card(self, file_id: str, kind: str = "photo") -> int:
+    def add_card(self, file_id: str, kind: str = "photo", phash: str | None = None) -> int:
         new_id = max((c["id"] for c in self.cards), default=0) + 1
-        self.cards.append({"id": new_id, "file_id": file_id, "kind": kind})
+        card = {"id": new_id, "file_id": file_id, "kind": kind}
+        if phash:
+            card["phash"] = phash
+        self.cards.append(card)
         self._save(f"add card #{new_id}")
         return new_id
+
+    def find_duplicate(self, phash: str | None, max_distance: int = 6):
+        if not phash:
+            return None
+        try:
+            target = imagehash.hex_to_hash(phash)
+        except Exception:
+            return None
+        for c in self.cards:
+            other = c.get("phash")
+            if not other:
+                continue
+            try:
+                dist = target - imagehash.hex_to_hash(other)
+            except Exception:
+                continue
+            if dist <= max_distance:
+                return c
+        return None
 
     def random_card(self):
         if not self.cards:
