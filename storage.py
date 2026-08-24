@@ -42,6 +42,10 @@ class CardStorage:
             result = self.repo.create_file(self.file_path, commit_message, content)
         self._sha = result["content"].sha
 
+    def persist(self, commit_message: str):
+        """Сохранить текущее состояние self.cards (например, после ручного изменения file_id/kind)."""
+        self._save(commit_message)
+
     def add_card(self, file_id: str, kind: str = "photo") -> int:
         new_id = max((c["id"] for c in self.cards), default=0) + 1
         self.cards.append({"id": new_id, "file_id": file_id, "kind": kind})
