@@ -177,3 +177,78 @@ class ReminderStore:
 
     def all(self) -> dict:
         return dict(self.data)
+
+
+class UserStore:
+    """Все, кто хоть раз писал боту — users.json в GitHub. Нужно для рассылок-уведомлений."""
+
+    def __init__(self, github_token: str, repo_name: str, file_path: str = "users.json"):
+        self.repo = Github(auth=Auth.Token(github_token)).get_user().get_repo(repo_name)
+        self.file_path = file_path
+        self.data = []  # список user_id
+        self._sha = None
+        self._load()
+
+    def _load(self):
+        try:
+            f = self.repo.get_contents(self.file_path)
+            self.data = json.loads(f.decoded_content.decode())
+            self._sha = f.sha
+        except Exception as e:
+            logger.warning("users.json не найден, стартуем с пустого: %s", e)
+            self.data = []
+            self._sha = None
+
+    def _save(self, commit_message: str):
+        content = json.dumps(self.data, ensure_ascii=False, indent=2)
+        if self._sha:
+            result = self.repo.update_file(self.file_path, commit_message, content, self._sha)
+        else:
+            result = self.repo.create_file(self.file_path, commit_message, content)
+        self._sha = result["content"].sha
+
+    def add(self, user_id: int) -> bool:
+        if user_id in self.data:
+            return False
+        self.data.append(user_id)
+        self._save(f"track new user {user_id}")
+        return True
+
+    def all(self) -> list:
+        return list(self.data)
+
+
+class MetaStore:
+    """Служебные флаги (напр. версия клавиатуры) — meta.json в GitHub."""
+
+    def __init__(self, github_token: str, repo_name: str, file_path: str = "meta.json"):
+        self.repo = Github(auth=Auth.Token(github_token)).get_user().get_repo(repo_name)
+        self.file_path = file_path
+        self.data = {}
+        self._sha = None
+        self._load()
+
+    def _load(self):
+        try:
+            f = self.repo.get_contents(self.file_path)
+            self.data = json.loads(f.decoded_content.decode())
+            self._sha = f.sha
+        except Exception as e:
+            logger.warning("meta.json не найден, стартуем с пустого: %s", e)
+            self.data = {}
+            self._sha = None
+
+    def _save(self, commit_message: str):
+        content = json.dumps(self.data, ensure_ascii=False, indent=2)
+        if self._sha:
+            result = self.repo.update_file(self.file_path, commit_message, content, self._sha)
+        else:
+            result = self.repo.create_file(self.file_path, commit_message, content)
+        self._sha = result["content"].sha
+
+    def get(self, key: str, default=None):
+        return self.data.get(key, default)
+
+    def set(self, key: str, value):
+        self.data[key] = value
+        self._save(f"meta set {key}={value}")
