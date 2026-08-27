@@ -46,12 +46,13 @@ KEYBOARD_VERSION = "v5-favorites-stats-reminders"
 REMINDER_BUTTON_TEXT = "⏰ Напоминания"
 FAVORITES_BUTTON_TEXT = "⭐ Избранное"
 STATS_BUTTON_TEXT = "📊 Статистика"
+VIEW_BUTTON_TEXT = "🔎 Показать по номеру"
 
 DRAW_BUTTON = ReplyKeyboardMarkup(
     [
         ["💎 Открыть жемчужину души"],
         [FAVORITES_BUTTON_TEXT, STATS_BUTTON_TEXT],
-        [REMINDER_BUTTON_TEXT],
+        [REMINDER_BUTTON_TEXT, VIEW_BUTTON_TEXT],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -129,6 +130,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def _fav_keyboard(card_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("❤️ Сохранить", callback_data=f"fav:{card_id}")]])
+
+
+async def view_card_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    context.user_data["awaiting_view_number"] = True
+    await update.message.reply_text("Пришли номер карточки, которую хочешь посмотреть.", reply_markup=DRAW_BUTTON)
+
+
+async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id == ADMIN_ID and context.user_data.get("awaiting_view_number"):
+        context.user_data["awaiting_view_number"] = False
+        text = (update.message.text or "").strip()
+        if not text.isdigit():
+            await update.message.reply_text("Это не похоже на номер карточки. Попробуй ещё раз через кнопку.", reply_markup=DRAW_BUTTON)
+            return
+        card_id = int(text)
+        card = next((c for c in storage.cards if c["id"] == card_id), None)
+        if card is None:
+            await update.message.reply_text(f"Карточка #{card_id} не найдена.", reply_markup=DRAW_BUTTON)
+            return
+        caption = f"Карточка #{card_id}"
+        file_ids = card_file_ids(card)
+        for i, fid in enumerate(file_ids):
+            is_last = i == len(file_ids) - 1
+            if card.get("kind") == "document":
+                await update.message.reply_document(
+                    document=fid, caption=caption if is_last else None, reply_markup=DRAW_BUTTON if is_last else None
+                )
+            else:
+                await update.message.reply_photo(
+                    photo=fid, caption=caption if is_last else None, reply_markup=DRAW_BUTTON if is_last else None
+                )
+        return
+    await start(update, context)
 
 
 async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -645,10 +681,11 @@ async def main():
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(FAVORITES_BUTTON_TEXT)}$"), favorites_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(STATS_BUTTON_TEXT)}$"), stats_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(REMINDER_BUTTON_TEXT)}$"), reminder_menu_cmd))
+    application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(VIEW_BUTTON_TEXT)}$"), view_card_prompt))
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_add_card_photo))
     application.add_handler(MessageHandler(filters.Document.IMAGE & filters.User(ADMIN_ID), admin_add_card_document))
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_ID), admin_ignore_non_admin_photo))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_text_router))
 
     for uid_str, time_str in reminders.all().items():
         hour, minute = map(int, time_str.split(":"))
