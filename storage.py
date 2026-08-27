@@ -55,17 +55,23 @@ class CardStorage:
         """Сохранить текущее состояние self.cards (например, после ручного изменения file_id/kind)."""
         self._save(commit_message)
 
-    def add_card(self, file_id: str, kind: str = "photo") -> int:
+    def add_card(self, file_id: str, kind: str = "photo", phash: str | None = None) -> int:
         new_id = max((c["id"] for c in self.cards), default=0) + 1
-        self.cards.append({"id": new_id, "file_id": file_id, "kind": kind})
+        card = {"id": new_id, "file_id": file_id, "kind": kind}
+        if phash:
+            card["phash"] = phash
+        self.cards.append(card)
         self._save(f"add card #{new_id}")
         return new_id
 
-    def add_multi_card(self, file_ids: list, kind: str = "photo") -> int:
+    def add_multi_card(self, file_ids: list, kind: str = "photo", phash: str | None = None) -> int:
         """Карточка из нескольких фото/файлов (напр. альбом) — при показе все страницы
         отправляются одна за другой, это одна карточка в колоде."""
         new_id = max((c["id"] for c in self.cards), default=0) + 1
-        self.cards.append({"id": new_id, "file_ids": list(file_ids), "kind": kind})
+        card = {"id": new_id, "file_ids": list(file_ids), "kind": kind}
+        if phash:
+            card["phash"] = phash
+        self.cards.append(card)
         self._save(f"add multi-page card #{new_id} ({len(file_ids)} pages)")
         return new_id
 
