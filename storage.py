@@ -2,6 +2,7 @@ import json
 import random
 import logging
 
+import imagehash
 from github import Github, Auth
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,25 @@ class CardStorage:
         self.cards.append({"id": new_id, "file_ids": list(file_ids), "kind": kind})
         self._save(f"add multi-page card #{new_id} ({len(file_ids)} pages)")
         return new_id
+
+    def find_duplicate(self, phash: str | None, max_distance: int = 6):
+        if not phash:
+            return None
+        try:
+            target = imagehash.hex_to_hash(phash)
+        except Exception:
+            return None
+        for c in self.cards:
+            other = c.get("phash")
+            if not other:
+                continue
+            try:
+                dist = target - imagehash.hex_to_hash(other)
+            except Exception:
+                continue
+            if dist <= max_distance:
+                return c
+        return None
 
     def random_card(self):
         if not self.cards:
