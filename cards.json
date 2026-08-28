@@ -538,6 +538,19 @@
       "id": 87,
       "file_id": "AgACAgIAAxkBAAIG2mqRDuSi-I7MMFjWys30iq5l0T_DAAJCHGsbskqJSAU4l1jC1-c6AQADAgADeQADPQQ",
       "kind": "photo"
+    },
+    {
+      "id": 88,
+      "file_ids": [
+        "AgACAgIAAxkBAAIG3WqRDv3iRLwqcdPUgYrONO0oOJWvAAJDHGsbskqJSE6TVE-S58HcAQADAgADeQADPQQ",
+        "AgACAgIAAxkBAAIG3mqRDv0EbuccMyXuj5IAAcrGBfAfUQACRBxrG7JKiUjklKAkQjM3nQEAAwIAA3kAAz0E",
+        "AgACAgIAAxkBAAIG32qRDv2qLB2y-5BREuACG6O27euwAAJFHGsbskqJSDxCTDcXaAbvAQADAgADeQADPQQ",
+        "AgACAgIAAxkBAAIG4GqRDv2TbtvBaloKBGy812cyr8_8AAJGHGsbskqJSLxOFkjC5XsIAQADAgADeQADPQQ",
+        "AgACAgIAAxkBAAIG4WqRDv0wo0BCD469GhAPRoxtHOxhAAJHHGsbskqJSG0P5YBuahnyAQADAgADeQADPQQ"
+      ],
+      "kind": "photo",
+      "phash": "bbc6cc1dc43897e0",
+      "content_hash": "af50aa20167f6566da53f34904cd90be3f71d7077cb5fa1f8990202c64a6f799"
     }
   ]
 }
