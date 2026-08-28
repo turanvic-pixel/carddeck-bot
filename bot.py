@@ -448,11 +448,11 @@ async def viewmode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             "Включён режим обычного пользователя. Админ-кнопки теперь не будут срабатывать для тебя — "
             "чтобы вернуть права, снова нажми «👁 Я админ / Я пользователь».",
-            reply_markup=DRAW_BUTTON,
+            reply_markup=keyboard_for(update.effective_user.id),
         )
     else:
         _view_as_user.discard(ADMIN_ID)
-        await query.message.reply_text("Админ-права возвращены.", reply_markup=DRAW_BUTTON)
+        await query.message.reply_text("Админ-права возвращены.", reply_markup=keyboard_for(update.effective_user.id))
 
 
 async def mode_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
