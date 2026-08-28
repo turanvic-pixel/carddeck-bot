@@ -691,6 +691,11 @@
       "id": 110,
       "file_id": "MC_B",
       "kind": "photo"
+    },
+    {
+      "id": 111,
+      "file_id": "MC_A",
+      "kind": "photo"
     }
   ]
 }
