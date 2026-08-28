@@ -65,7 +65,18 @@ MODE_BUTTON_TEXT = "🔀 Режим показа"
 VIEWMODE_BUTTON_TEXT = "👁 Я админ / Я пользователь"
 MERGE_BUTTON_TEXT = "🔗 Объединить карточки"
 
-DRAW_BUTTON = ReplyKeyboardMarkup(
+USER_DRAW_BUTTON = ReplyKeyboardMarkup(
+    [
+        ["💎 Открыть жемчужину души"],
+        [MODE_BUTTON_TEXT],
+        [FAVORITES_BUTTON_TEXT, STATS_BUTTON_TEXT],
+        [REMINDER_BUTTON_TEXT],
+    ],
+    resize_keyboard=True,
+    is_persistent=True,
+)
+
+ADMIN_DRAW_BUTTON = ReplyKeyboardMarkup(
     [
         ["💎 Открыть жемчужину души"],
         [MODE_BUTTON_TEXT],
@@ -79,6 +90,15 @@ DRAW_BUTTON = ReplyKeyboardMarkup(
     resize_keyboard=True,
     is_persistent=True,
 )
+
+
+def keyboard_for(user_id: int) -> ReplyKeyboardMarkup:
+    return ADMIN_DRAW_BUTTON if _is_admin(user_id) else USER_DRAW_BUTTON
+
+
+# сохраняем имя DRAW_BUTTON как алиас на "полную" клавиатуру там, где явный user_id
+# не всегда доступен (напр. фоновые задачи с уже известным chat_id) — заменяется точечно ниже.
+DRAW_BUTTON = ADMIN_DRAW_BUTTON
 
 # статистика просмотров — в памяти процесса (как и очередь карточек), сбрасывается при рестарте Render
 _stats_data: dict[int, dict[str, int]] = {}
@@ -138,7 +158,7 @@ async def broadcast_keyboard_update(application: Application):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text(
         "Привет! Кнопка внизу экрана всегда под рукой — жми и вытягивай карточку.",
-        reply_markup=DRAW_BUTTON,
+        reply_markup=keyboard_for(update.effective_user.id),
     )
     try:
         chat = await context.bot.get_chat(update.effective_chat.id)
@@ -364,7 +384,7 @@ async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = storage.get_mode(user_id)
     card = storage.next_sequential_card(user_id) if mode == "sequential" else storage.next_card_for_user(user_id)
     if card is None:
-        await update.message.reply_text("Пока нет ни одной карточки в коллекции.", reply_markup=DRAW_BUTTON)
+        await update.message.reply_text("Пока нет ни одной карточки в коллекции.", reply_markup=keyboard_for(user_id))
         return
     record_view(user_id)
     caption = f"Карточка #{card['id']}" if _is_admin(update.effective_user.id) else None
@@ -440,16 +460,17 @@ async def mode_choice_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     action = query.data.split(":", 1)[1]
     user_id = update.effective_user.id
+    kb = keyboard_for(user_id)
     if action == "random":
         storage.set_mode(user_id, "random")
-        await query.message.reply_text("Режим: 🎲 случайные карточки без повторов.", reply_markup=DRAW_BUTTON)
+        await query.message.reply_text("Режим: 🎲 случайные карточки без повторов.", reply_markup=kb)
     elif action == "seq_restart":
         storage.set_mode(user_id, "sequential")
         storage.reset_sequential(user_id)
-        await query.message.reply_text("Режим: 🔢 по порядку номеров, начинаем сначала.", reply_markup=DRAW_BUTTON)
+        await query.message.reply_text("Режим: 🔢 по порядку номеров, начинаем сначала.", reply_markup=kb)
     elif action == "seq_continue":
         storage.set_mode(user_id, "sequential")
-        await query.message.reply_text("Режим: ▶️ по порядку номеров, продолжаем с прошлого места.", reply_markup=DRAW_BUTTON)
+        await query.message.reply_text("Режим: ▶️ по порядку номеров, продолжаем с прошлого места.", reply_markup=kb)
 
 
 async def favorite_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
