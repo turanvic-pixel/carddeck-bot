@@ -531,7 +531,7 @@ async def group_choice_callback(update: Update, context: ContextTypes.DEFAULT_TY
                     continue
             storage.add_card(fid, kind=kind)
             added += 1
-        msg = f"Добавлено отдельными карточками: {added}."
+        msg = f"Добавлено отдельными карточками: {added}. Всего карточек: {storage.count()}."
         if skipped:
             msg += f" Пропущено как дубликат: {skipped}."
         await query.message.reply_text(msg, reply_markup=DRAW_BUTTON)
