@@ -688,6 +688,13 @@
       "kind": "photo",
       "phash": "8000000000000000",
       "content_hash": "93953c6cc0491fcccabe650ceafe48cca6a4e4624e43dc1917afc6d1e0c62494"
+    },
+    {
+      "id": 108,
+      "file_id": "DUP_TEST_PHOTO",
+      "kind": "photo",
+      "phash": "8000000000000000",
+      "content_hash": "93953c6cc0491fcccabe650ceafe48cca6a4e4624e43dc1917afc6d1e0c62494"
     }
   ]
 }
