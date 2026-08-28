@@ -64,6 +64,18 @@
       "id": 13,
       "file_id": "AgACAgIAAxkBAAIFpmqQ4vs-4lXyYylRQy9SAAFueQ4zEgAC-CxrG7JKgUjILXrXZc16WQEAAwIAA3kAAz0E",
       "kind": "photo"
+    },
+    {
+      "id": 14,
+      "file_ids": [
+        "UPLOADED_PAGE",
+        "UPLOADED_PAGE",
+        "UPLOADED_PAGE",
+        "UPLOADED_PAGE"
+      ],
+      "kind": "photo",
+      "phash": "9e1e1e1c3ce1e1e1",
+      "content_hash": "46af93733140ce4b5b4e1faa9f4435979c63f16f2cbd026bc505783d57c997ee"
     }
   ]
 }
