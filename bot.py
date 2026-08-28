@@ -53,10 +53,12 @@ DELETE_BUTTON_TEXT = "🗑 Удалить карточку"
 DELETE_ALL_BUTTON_TEXT = "🧨 Удалить все карточки"
 EXPORT_BUTTON_TEXT = "📦 Скачать все (ZIP)"
 TEXT_CARD_BUTTON_TEXT = "✍️ Текстовая карточка"
+MODE_BUTTON_TEXT = "🔀 Режим показа"
 
 DRAW_BUTTON = ReplyKeyboardMarkup(
     [
         ["💎 Открыть жемчужину души"],
+        [MODE_BUTTON_TEXT],
         [FAVORITES_BUTTON_TEXT, STATS_BUTTON_TEXT],
         [REMINDER_BUTTON_TEXT, VIEW_BUTTON_TEXT],
         [DELETE_BUTTON_TEXT, DELETE_ALL_BUTTON_TEXT],
@@ -299,11 +301,13 @@ async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    card = storage.next_card_for_user(update.effective_user.id)
+    user_id = update.effective_user.id
+    mode = storage.get_mode(user_id)
+    card = storage.next_sequential_card(user_id) if mode == "sequential" else storage.next_card_for_user(user_id)
     if card is None:
         await update.message.reply_text("Пока нет ни одной карточки в коллекции.", reply_markup=DRAW_BUTTON)
         return
-    record_view(update.effective_user.id)
+    record_view(user_id)
     caption = f"Карточка #{card['id']}" if update.effective_user.id == ADMIN_ID else None
     kb = _fav_keyboard(card["id"])
     file_ids = card_file_ids(card)
@@ -317,6 +321,40 @@ async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_photo(
                 photo=fid, caption=caption if is_last else None, reply_markup=kb if is_last else None
             )
+
+
+def _mode_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    current = storage.get_mode(user_id)
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(("✅ " if current == "random" else "") + "🎲 Случайно", callback_data="mode:random")],
+            [InlineKeyboardButton("🔢 По порядку с начала", callback_data="mode:seq_restart")],
+            [InlineKeyboardButton(("✅ " if current == "sequential" else "") + "▶️ Продолжить по порядку", callback_data="mode:seq_continue")],
+        ]
+    )
+
+
+async def mode_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Как показывать карточки?", reply_markup=_mode_keyboard(update.effective_user.id)
+    )
+
+
+async def mode_choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    action = query.data.split(":", 1)[1]
+    user_id = update.effective_user.id
+    if action == "random":
+        storage.set_mode(user_id, "random")
+        await query.message.reply_text("Режим: 🎲 случайные карточки без повторов.", reply_markup=DRAW_BUTTON)
+    elif action == "seq_restart":
+        storage.set_mode(user_id, "sequential")
+        storage.reset_sequential(user_id)
+        await query.message.reply_text("Режим: 🔢 по порядку номеров, начинаем сначала.", reply_markup=DRAW_BUTTON)
+    elif action == "seq_continue":
+        storage.set_mode(user_id, "sequential")
+        await query.message.reply_text("Режим: ▶️ по порядку номеров, продолжаем с прошлого места.", reply_markup=DRAW_BUTTON)
 
 
 async def favorite_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1102,6 +1140,7 @@ async def main():
     application.add_handler(CommandHandler("remind_on", remind_on_cmd))
     application.add_handler(CommandHandler("remind_off", remind_off_cmd))
     application.add_handler(CallbackQueryHandler(favorite_callback, pattern="^fav:"))
+    application.add_handler(CallbackQueryHandler(mode_choice_callback, pattern="^mode:"))
     application.add_handler(CallbackQueryHandler(unfavorite_callback, pattern="^unfav:"))
     application.add_handler(CallbackQueryHandler(reminder_callback, pattern="^remind_"))
     application.add_handler(CallbackQueryHandler(delete_confirm_callback, pattern="^(confirmdel:|canceldel$)"))
@@ -1109,6 +1148,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(group_choice_callback, pattern="^(splitgroup:|combinegroup:)"))
     application.add_handler(CallbackQueryHandler(duplicate_confirm_callback, pattern="^(forceadd:|skipadd:)"))
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
+    application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(MODE_BUTTON_TEXT)}$"), mode_prompt))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(FAVORITES_BUTTON_TEXT)}$"), favorites_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(STATS_BUTTON_TEXT)}$"), stats_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(REMINDER_BUTTON_TEXT)}$"), reminder_menu_cmd))
