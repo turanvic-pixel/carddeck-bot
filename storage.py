@@ -119,6 +119,14 @@ class CardStorage:
         self._save(f"delete card #{card_id}")
         return True
 
+    def delete_all(self) -> int:
+        count = len(self.cards)
+        if count == 0:
+            return 0
+        self.cards = []
+        self._save(f"delete all {count} cards")
+        return count
+
     def list_ids(self) -> list:
         return [c["id"] for c in self.cards]
 
