@@ -9,6 +9,11 @@
       "id": 2,
       "file_id": "P2",
       "kind": "photo"
+    },
+    {
+      "id": 3,
+      "file_id": "P3",
+      "kind": "photo"
     }
   ]
 }
