@@ -11,6 +11,7 @@ import aiohttp
 from aiohttp import web
 from PIL import Image, ImageDraw, ImageFont
 import imagehash
+import pymupdf
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -370,6 +371,21 @@ def optimize_image_bytes(raw_bytes: bytes) -> bytes:
     return out.getvalue()
 
 
+def render_pdf_all_pages(pdf_bytes: bytes) -> list:
+    """Рендерит все страницы PDF в PNG-байты нужного разрешения, по порядку."""
+    pdf = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        pages = []
+        for page in pdf:
+            zoom = MAX_IMAGE_DIMENSION / max(page.rect.width, page.rect.height)
+            matrix = pymupdf.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=matrix)
+            pages.append(pix.tobytes("png"))
+        return pages
+    finally:
+        pdf.close()
+
+
 TEXT_CARD_SIZE = (1200, 1600)
 FONT_PATH = os.path.join(os.path.dirname(__file__), "DejaVuSans.ttf")
 
@@ -576,6 +592,47 @@ async def admin_add_card_photo(update: Update, context: ContextTypes.DEFAULT_TYP
     new_id = storage.add_card(photo.file_id, kind="photo", phash=phash, content_hash=content_hash)
     await update.message.reply_text(
         f"Добавлено! Карточка #{new_id}. Всего карточек: {storage.count()}.",
+        reply_markup=DRAW_BUTTON,
+    )
+
+
+async def admin_add_card_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    doc = update.message.document
+    tg_file = await context.bot.get_file(doc.file_id)
+    raw = await tg_file.download_as_bytearray()
+    try:
+        pages = render_pdf_all_pages(bytes(raw))
+    except Exception as e:
+        logger.warning("Не удалось отрендерить PDF: %s", e)
+        await update.message.reply_text("Не получилось прочитать этот PDF, попробуй другой файл.")
+        return
+    if not pages:
+        await update.message.reply_text("В этом PDF не нашлось страниц.")
+        return
+    phash = compute_phash(pages[0])
+    content_hash = compute_content_hash(bytes(raw))
+    dup = storage.find_duplicate(content_hash=content_hash)
+    if dup:
+        await update.message.reply_text(
+            f"Такая карточка уже есть — #{dup['id']}. Не добавляю дубликат.", reply_markup=DRAW_BUTTON
+        )
+        return
+    file_ids = []
+    for page_bytes in pages:
+        try:
+            optimized = optimize_image_bytes(page_bytes)
+        except Exception:
+            optimized = page_bytes
+        sent = await context.bot.send_photo(chat_id=ADMIN_ID, photo=io.BytesIO(optimized))
+        file_ids.append(sent.photo[-1].file_id)
+    if len(file_ids) == 1:
+        new_id = storage.add_card(file_ids[0], kind="photo", phash=phash, content_hash=content_hash)
+    else:
+        new_id = storage.add_multi_card(file_ids, kind="photo", phash=phash, content_hash=content_hash)
+    await update.message.reply_text(
+        f"Добавлено из PDF ({len(file_ids)} стр.)! Карточка #{new_id}. Всего карточек: {storage.count()}.",
         reply_markup=DRAW_BUTTON,
     )
 
@@ -979,6 +1036,7 @@ async def main():
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(EXPORT_BUTTON_TEXT)}$"), export_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(TEXT_CARD_BUTTON_TEXT)}$"), text_card_prompt))
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_add_card_photo))
+    application.add_handler(MessageHandler(filters.Document.PDF & filters.User(ADMIN_ID), admin_add_card_pdf))
     application.add_handler(MessageHandler(filters.Document.IMAGE & filters.User(ADMIN_ID), admin_add_card_document))
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_ID), admin_ignore_non_admin_photo))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_text_router))
