@@ -369,6 +369,12 @@
         "AgACAgIAAxkBAAIFJWqQaD-TMdJ73V46rmJMgb5dXiZlAAIMH2sbrQGASIaSRDt7CLpXAQADAgADeQADPQQ"
       ],
       "kind": "photo"
+    },
+    {
+      "id": 62,
+      "file_id": "TEST_TEXT_CARD_FILE_ID",
+      "kind": "photo",
+      "content_hash": "c21a40d0d95438e635b535fefddbd5152af67360aec53a46b501150df72f5c7a"
     }
   ]
 }
