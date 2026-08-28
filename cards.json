@@ -340,6 +340,26 @@
       "id": 61,
       "file_id": "AgACAgIAAxkBAAIGPWqQ8w7eHI6qYCvVfJmx0BNpwCwLAALlLWsbskqBSIVuFWUwg_BpAQADAgADeQADPQQ",
       "kind": "photo"
+    },
+    {
+      "id": 62,
+      "file_ids": [
+        "AgACAgIAAxkDAAIGIWqQ8GtFExm5OpyUsZ5mIpCqWxKGAAKjLWsbskqBSPGmPV8JLllcAQADAgADdwADPQQ",
+        "AgACAgIAAxkDAAIGImqQ8Gtt6Qd92X6hvZdbm1ZgGq6cAAKkLWsbskqBSD2DH6ZB5vFIAQADAgADdwADPQQ",
+        "AgACAgIAAxkDAAIGI2qQ8GxFtJQWXcHxdxnnCdgYG1b4AAKlLWsbskqBSOxZnd4StCOMAQADAgADdwADPQQ",
+        "AgACAgIAAxkDAAIGJGqQ8Gwv0_urz19Z7f_XXC4kf-XsAAKmLWsbskqBSH0Vc_a_SnRxAQADAgADdwADPQQ",
+        "AgACAgIAAxkDAAIGJWqQ8G27K7ffF-SU4hZO1kIuqoJPAAKnLWsbskqBSH58PbiXEIfZAQADAgADdwADPQQ",
+        "AgACAgIAAxkDAAIGJmqQ8G13HmAPfJCm7tWAqUmntHSYAAKoLWsbskqBSB4bV_GinxDjAQADAgADdwADPQQ",
+        "AgACAgIAAxkDAAIGJ2qQ8G7tRwGeemZdMwJxDL63dhQWAAKpLWsbskqBSC4GnO4f0xYYAQADAgADdwADPQQ",
+        "AgACAgIAAxkDAAIGKGqQ8G5TZz1kubktiOrcUIXdQFQJAAKqLWsbskqBSO-CtpYgzNf8AQADAgADdwADPQQ",
+        "AgACAgIAAxkDAAIGKWqQ8G5rmknNuwJFEgk3zg4eTTAUAAKrLWsbskqBSA88kwMOL_l6AQADAgADdwADPQQ",
+        "AgACAgIAAxkDAAIGKmqQ8G8XwFpZBQy2mA3pPwdUssTZAAKsLWsbskqBSBK8ZPkk4hfzAQADAgADdwADPQQ",
+        "AgACAgIAAxkDAAIGK2qQ8G-VXvvuE08iruJYUE_sj9juAAKtLWsbskqBSIdLQ8juXCuFAQADAgADdwADPQQ",
+        "AgACAgIAAxkDAAIGLGqQ8HAo8vLZdiWwzudnb1pwlcL2AAKuLWsbskqBSBg8Og0KOvJlAQADAgADdwADPQQ"
+      ],
+      "kind": "photo",
+      "phash": "bbc4c43b913966c6",
+      "content_hash": "5d38ca65efb0a2504176ffc4ea6f9ea70eacbdb3a2309a8751217d01bfde9556"
     }
   ]
 }
