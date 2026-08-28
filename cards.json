@@ -683,13 +683,6 @@
       "content_hash": "80a2b99eb9b8e6b434f7a1041362d72c9f69dd941ba595f1b5e00ef1ad41cc74"
     },
     {
-      "id": 107,
-      "file_id": "DUP_TEST_PHOTO",
-      "kind": "photo",
-      "phash": "8000000000000000",
-      "content_hash": "93953c6cc0491fcccabe650ceafe48cca6a4e4624e43dc1917afc6d1e0c62494"
-    },
-    {
       "id": 108,
       "file_id": "DUP_TEST_PHOTO",
       "kind": "photo",
