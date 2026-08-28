@@ -240,6 +240,11 @@
       "kind": "photo",
       "phash": "b199cb67c6649c92",
       "content_hash": "9f2fcfbb3d9a6337e17b161085c2437534692ad23f09a548af65aa7bb4997010"
+    },
+    {
+      "id": 42,
+      "file_id": "AgACAgIAAxkBAAIGFmqQ7-vtO2g9tz6SmkRvUy7tRMYKAAKbLWsbskqBSGNT0uPNu0tuAQADAgADeQADPQQ",
+      "kind": "photo"
     }
   ]
 }
