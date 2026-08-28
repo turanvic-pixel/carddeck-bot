@@ -686,6 +686,11 @@
       "id": 107,
       "file_id": "MERGE_TEST_A",
       "kind": "photo"
+    },
+    {
+      "id": 108,
+      "file_id": "MERGE_TEST_B",
+      "kind": "photo"
     }
   ]
 }
