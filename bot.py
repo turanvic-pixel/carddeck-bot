@@ -9,7 +9,7 @@ import zipfile
 
 import aiohttp
 from aiohttp import web
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import imagehash
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.ext import (
@@ -49,13 +49,17 @@ FAVORITES_BUTTON_TEXT = "⭐ Избранное"
 STATS_BUTTON_TEXT = "📊 Статистика"
 VIEW_BUTTON_TEXT = "🔎 Показать по номеру"
 DELETE_BUTTON_TEXT = "🗑 Удалить карточку"
+DELETE_ALL_BUTTON_TEXT = "🧨 Удалить все карточки"
+EXPORT_BUTTON_TEXT = "📦 Скачать все (ZIP)"
+TEXT_CARD_BUTTON_TEXT = "✍️ Текстовая карточка"
 
 DRAW_BUTTON = ReplyKeyboardMarkup(
     [
         ["💎 Открыть жемчужину души"],
         [FAVORITES_BUTTON_TEXT, STATS_BUTTON_TEXT],
         [REMINDER_BUTTON_TEXT, VIEW_BUTTON_TEXT],
-        [DELETE_BUTTON_TEXT],
+        [DELETE_BUTTON_TEXT, DELETE_ALL_BUTTON_TEXT],
+        [EXPORT_BUTTON_TEXT, TEXT_CARD_BUTTON_TEXT],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -193,6 +197,44 @@ async def delete_confirm_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.message.reply_text(f"Карточка #{card_id} не найдена.", reply_markup=DRAW_BUTTON)
 
 
+async def delete_all_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    total = storage.count()
+    if total == 0:
+        await update.message.reply_text("Карточек и так нет.", reply_markup=DRAW_BUTTON)
+        return
+    kb = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton(f"✅ Да, удалить все {total}", callback_data="confirmdeleteall"),
+            InlineKeyboardButton("❌ Отмена", callback_data="canceldeleteall"),
+        ]]
+    )
+    await update.message.reply_text(
+        f"Точно удалить ВСЕ {total} карточек? Это необратимо.", reply_markup=kb
+    )
+
+
+async def delete_all_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if update.effective_user.id != ADMIN_ID:
+        await query.answer()
+        return
+    await query.answer()
+    if query.data == "canceldeleteall":
+        await query.message.reply_text("Отменено, карточки на месте.", reply_markup=DRAW_BUTTON)
+        return
+    removed = storage.delete_all()
+    await query.message.reply_text(f"Удалено карточек: {removed}. Коллекция пуста.", reply_markup=DRAW_BUTTON)
+
+
+async def text_card_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    context.user_data["awaiting_text_card"] = True
+    await update.message.reply_text("Пришли текст — я оформлю его в карточку.", reply_markup=DRAW_BUTTON)
+
+
 async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID and context.user_data.get("awaiting_delete_number"):
         context.user_data["awaiting_delete_number"] = False
@@ -225,6 +267,31 @@ async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_photo(
                     photo=fid, caption=caption if is_last else None, reply_markup=DRAW_BUTTON if is_last else None
                 )
+        return
+    if update.effective_user.id == ADMIN_ID and context.user_data.get("awaiting_text_card"):
+        context.user_data["awaiting_text_card"] = False
+        text = update.message.text
+        if not text or not text.strip():
+            return
+        try:
+            content_hash = compute_content_hash(text.strip().encode("utf-8"))
+            dup = storage.find_duplicate(content_hash=content_hash)
+            if dup:
+                await update.message.reply_text(
+                    f"Такая карточка уже есть — #{dup['id']}. Не добавляю дубликат.", reply_markup=DRAW_BUTTON
+                )
+                return
+            img_bytes = render_text_card(text)
+            sent = await update.message.reply_photo(photo=io.BytesIO(img_bytes))
+            photo_file_id = sent.photo[-1].file_id
+            new_id = storage.add_card(photo_file_id, kind="photo", content_hash=content_hash)
+            await update.message.reply_text(
+                f"Добавлено из текста! Карточка #{new_id}. Всего карточек: {storage.count()}.",
+                reply_markup=DRAW_BUTTON,
+            )
+        except Exception as e:
+            logger.exception("Ошибка при добавлении текстовой карточки")
+            await update.message.reply_text(f"Не удалось добавить карточку из текста: {e}", reply_markup=DRAW_BUTTON)
         return
     await start(update, context)
 
@@ -300,6 +367,64 @@ def optimize_image_bytes(raw_bytes: bytes) -> bytes:
         img.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION), Image.LANCZOS)
     out = io.BytesIO()
     img.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    return out.getvalue()
+
+
+TEXT_CARD_SIZE = (1200, 1600)
+FONT_PATH = os.path.join(os.path.dirname(__file__), "DejaVuSans.ttf")
+
+
+def _wrap_by_pixel_width(draw, text: str, font, max_width: int) -> list:
+    """Переносит строки по фактической ширине в пикселях, а не по числу символов —
+    иначе строки обрываются рано и справа остаётся пустое место."""
+    lines = []
+    for paragraph in text.split("\n"):
+        if not paragraph.strip():
+            lines.append("")
+            continue
+        words = paragraph.split(" ")
+        current = ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if draw.textlength(candidate, font=font) <= max_width or not current:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+    return lines
+
+
+def render_text_card(text: str) -> bytes:
+    """Оформляет обычный текст в карточку: тёплый кремовый фон + текст по центру,
+    размер шрифта подбирается под длину текста — короткий текст крупно заполняет карточку."""
+    width, height = TEXT_CARD_SIZE
+    bg_color = (240, 233, 220)
+    text_color = (40, 34, 28)
+    margin = 90
+    max_text_width = width - 2 * margin
+
+    img = Image.new("RGB", (width, height), bg_color)
+    draw = ImageDraw.Draw(img)
+
+    for font_size in range(220, 17, -2):
+        font = ImageFont.truetype(FONT_PATH, font_size)
+        lines = _wrap_by_pixel_width(draw, text, font, max_text_width)
+        line_height = int(font_size * 1.35)
+        total_height = line_height * len(lines)
+        max_line_width = max((draw.textlength(line, font=font) for line in lines), default=0)
+        if total_height <= height - 2 * margin and max_line_width <= max_text_width:
+            break
+
+    y = (height - total_height) // 2
+    for line in lines:
+        line_width = draw.textlength(line, font=font)
+        x = (width - line_width) / 2
+        draw.text((x, y), line, font=font, fill=text_color)
+        y += line_height
+
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=92)
     return out.getvalue()
 
 
@@ -782,12 +907,16 @@ async def main():
     application.add_handler(CallbackQueryHandler(unfavorite_callback, pattern="^unfav:"))
     application.add_handler(CallbackQueryHandler(reminder_callback, pattern="^remind_"))
     application.add_handler(CallbackQueryHandler(delete_confirm_callback, pattern="^(confirmdel:|canceldel$)"))
+    application.add_handler(CallbackQueryHandler(delete_all_confirm_callback, pattern="^(confirmdeleteall$|canceldeleteall$)"))
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(FAVORITES_BUTTON_TEXT)}$"), favorites_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(STATS_BUTTON_TEXT)}$"), stats_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(REMINDER_BUTTON_TEXT)}$"), reminder_menu_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(VIEW_BUTTON_TEXT)}$"), view_card_prompt))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(DELETE_BUTTON_TEXT)}$"), delete_card_prompt))
+    application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(DELETE_ALL_BUTTON_TEXT)}$"), delete_all_prompt))
+    application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(EXPORT_BUTTON_TEXT)}$"), export_cmd))
+    application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(TEXT_CARD_BUTTON_TEXT)}$"), text_card_prompt))
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_add_card_photo))
     application.add_handler(MessageHandler(filters.Document.IMAGE & filters.User(ADMIN_ID), admin_add_card_document))
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_ID), admin_ignore_non_admin_photo))
