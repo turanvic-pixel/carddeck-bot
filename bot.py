@@ -29,6 +29,14 @@ logger = logging.getLogger("carddeck-bot")
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_ID = int(os.environ["ADMIN_ID"])
+
+# Позволяет тебе временно "притвориться" обычным пользователем, чтобы проверить,
+# что видят и могут делать остальные, не давая им реальных прав.
+_view_as_user: set = set()
+
+
+def _is_admin(user_id: int) -> bool:
+    return user_id == ADMIN_ID and user_id not in _view_as_user
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "carddeck-bot")
 EXTERNAL_URL = os.environ.get("EXTERNAL_URL")  # напр. https://carddeck-bot.onrender.com
@@ -54,6 +62,7 @@ DELETE_ALL_BUTTON_TEXT = "🧨 Удалить все карточки"
 EXPORT_BUTTON_TEXT = "📦 Скачать все (ZIP)"
 TEXT_CARD_BUTTON_TEXT = "✍️ Текстовая карточка"
 MODE_BUTTON_TEXT = "🔀 Режим показа"
+VIEWMODE_BUTTON_TEXT = "👁 Я админ / Я пользователь"
 
 DRAW_BUTTON = ReplyKeyboardMarkup(
     [
@@ -63,6 +72,7 @@ DRAW_BUTTON = ReplyKeyboardMarkup(
         [REMINDER_BUTTON_TEXT, VIEW_BUTTON_TEXT],
         [DELETE_BUTTON_TEXT, DELETE_ALL_BUTTON_TEXT],
         [EXPORT_BUTTON_TEXT, TEXT_CARD_BUTTON_TEXT],
+        [VIEWMODE_BUTTON_TEXT],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -143,14 +153,14 @@ def _fav_keyboard(card_id: int) -> InlineKeyboardMarkup:
 
 
 async def view_card_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     context.user_data["awaiting_view_number"] = True
     await update.message.reply_text("Пришли номер карточки, которую хочешь посмотреть.", reply_markup=DRAW_BUTTON)
 
 
 async def delete_card_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     context.user_data["awaiting_delete_number"] = True
     await update.message.reply_text("Пришли номер карточки, которую нужно удалить.", reply_markup=DRAW_BUTTON)
@@ -183,7 +193,7 @@ async def _prompt_delete_confirmation(message, card_id: int):
 
 async def delete_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         await query.answer()
         return
     await query.answer()
@@ -201,7 +211,7 @@ async def delete_confirm_callback(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def delete_all_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     total = storage.count()
     if total == 0:
@@ -220,7 +230,7 @@ async def delete_all_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def delete_all_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         await query.answer()
         return
     await query.answer()
@@ -232,14 +242,14 @@ async def delete_all_confirm_callback(update: Update, context: ContextTypes.DEFA
 
 
 async def text_card_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     context.user_data["awaiting_text_card"] = True
     await update.message.reply_text("Пришли текст — я оформлю его в карточку.", reply_markup=DRAW_BUTTON)
 
 
 async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id == ADMIN_ID and context.user_data.get("awaiting_delete_number"):
+    if _is_admin(update.effective_user.id) and context.user_data.get("awaiting_delete_number"):
         context.user_data["awaiting_delete_number"] = False
         text = (update.message.text or "").strip()
         if not text.isdigit():
@@ -247,7 +257,7 @@ async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await _prompt_delete_confirmation(update.message, int(text))
         return
-    if update.effective_user.id == ADMIN_ID and context.user_data.get("awaiting_view_number"):
+    if _is_admin(update.effective_user.id) and context.user_data.get("awaiting_view_number"):
         context.user_data["awaiting_view_number"] = False
         text = (update.message.text or "").strip()
         if not text.isdigit():
@@ -271,7 +281,7 @@ async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     photo=fid, caption=caption if is_last else None, reply_markup=DRAW_BUTTON if is_last else None
                 )
         return
-    if update.effective_user.id == ADMIN_ID and context.user_data.get("awaiting_text_card"):
+    if _is_admin(update.effective_user.id) and context.user_data.get("awaiting_text_card"):
         context.user_data["awaiting_text_card"] = False
         text = update.message.text
         if not text or not text.strip():
@@ -308,7 +318,7 @@ async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Пока нет ни одной карточки в коллекции.", reply_markup=DRAW_BUTTON)
         return
     record_view(user_id)
-    caption = f"Карточка #{card['id']}" if update.effective_user.id == ADMIN_ID else None
+    caption = f"Карточка #{card['id']}" if _is_admin(update.effective_user.id) else None
     kb = _fav_keyboard(card["id"])
     file_ids = card_file_ids(card)
     for i, fid in enumerate(file_ids):
@@ -332,6 +342,42 @@ def _mode_keyboard(user_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(("✅ " if current == "sequential" else "") + "▶️ Продолжить по порядку", callback_data="mode:seq_continue")],
         ]
     )
+
+
+async def viewmode_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    is_user_view = update.effective_user.id in _view_as_user
+    kb = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton(("✅ " if not is_user_view else "") + "🛠 Режим администратора", callback_data="viewmode:admin"),
+            InlineKeyboardButton(("✅ " if is_user_view else "") + "👤 Режим обычного пользователя", callback_data="viewmode:user"),
+        ]]
+    )
+    await update.message.reply_text(
+        "В каком режиме тебе показывать бота? В режиме пользователя админ-кнопки работать не будут — "
+        "так можно проверить, что реально доступно остальным.",
+        reply_markup=kb,
+    )
+
+
+async def viewmode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if update.effective_user.id != ADMIN_ID:
+        await query.answer()
+        return
+    await query.answer()
+    action = query.data.split(":", 1)[1]
+    if action == "user":
+        _view_as_user.add(ADMIN_ID)
+        await query.message.reply_text(
+            "Включён режим обычного пользователя. Админ-кнопки теперь не будут срабатывать для тебя — "
+            "чтобы вернуть права, снова нажми «👁 Я админ / Я пользователь».",
+            reply_markup=DRAW_BUTTON,
+        )
+    else:
+        _view_as_user.discard(ADMIN_ID)
+        await query.message.reply_text("Админ-права возвращены.", reply_markup=DRAW_BUTTON)
 
 
 async def mode_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -530,7 +576,7 @@ async def _ask_duplicate_confirmation(bot, chat_id, existing_card: dict, pending
 
 async def duplicate_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         await query.answer()
         return
     await query.answer()
@@ -606,7 +652,7 @@ async def _flush_media_group(context: ContextTypes.DEFAULT_TYPE):
 
 async def group_choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         await query.answer()
         return
     await query.answer()
@@ -666,7 +712,7 @@ def _schedule_media_group_flush(context: ContextTypes.DEFAULT_TYPE, group_id: st
 
 
 async def admin_add_card_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     photo = update.message.photo[-1]
     group_id = update.message.media_group_id
@@ -704,7 +750,7 @@ async def admin_add_card_photo(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def admin_add_card_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     doc = update.message.document
     tg_file = await context.bot.get_file(doc.file_id)
@@ -756,7 +802,7 @@ async def admin_add_card_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def admin_add_card_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     doc = update.message.document
     if not doc.mime_type or not doc.mime_type.startswith("image/"):
@@ -802,7 +848,7 @@ async def admin_add_card_document(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def reprocess_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     doc_cards = [c for c in storage.cards if c.get("kind") == "document"]
     if not doc_cards:
@@ -837,7 +883,7 @@ async def reprocess_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def hash_missing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     missing = [c for c in storage.cards if not c.get("content_hash")]
     if not missing:
@@ -869,7 +915,7 @@ async def hash_missing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def hash_missing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     missing = [c for c in storage.cards if not c.get("phash")]
     if not missing:
@@ -900,13 +946,13 @@ async def hash_missing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def admin_ignore_non_admin_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id == ADMIN_ID:
+    if _is_admin(update.effective_user.id):
         return
     await update.message.reply_text("Фото принимает только администратор коллекции.")
 
 
 async def count_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     ids = storage.list_ids()
     preview = ", ".join(str(i) for i in ids[:30])
@@ -915,7 +961,7 @@ async def count_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def card_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     if not context.args or not context.args[0].isdigit():
         await update.message.reply_text("Формат: /card <номер карточки>, например /card 3")
@@ -936,7 +982,7 @@ async def card_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     if not context.args or not context.args[0].isdigit():
         await update.message.reply_text("Формат: /delete <номер карточки>, например /delete 3")
@@ -957,7 +1003,7 @@ MAX_ZIP_BYTES = 40 * 1024 * 1024  # запас от лимита Telegram в 50 
 
 
 async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not _is_admin(update.effective_user.id):
         return
     if not storage.cards:
         await update.message.reply_text("Карточек пока нет.")
@@ -1141,6 +1187,7 @@ async def main():
     application.add_handler(CommandHandler("remind_off", remind_off_cmd))
     application.add_handler(CallbackQueryHandler(favorite_callback, pattern="^fav:"))
     application.add_handler(CallbackQueryHandler(mode_choice_callback, pattern="^mode:"))
+    application.add_handler(CallbackQueryHandler(viewmode_callback, pattern="^viewmode:"))
     application.add_handler(CallbackQueryHandler(unfavorite_callback, pattern="^unfav:"))
     application.add_handler(CallbackQueryHandler(reminder_callback, pattern="^remind_"))
     application.add_handler(CallbackQueryHandler(delete_confirm_callback, pattern="^(confirmdel:|canceldel$)"))
@@ -1149,6 +1196,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(duplicate_confirm_callback, pattern="^(forceadd:|skipadd:)"))
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(MODE_BUTTON_TEXT)}$"), mode_prompt))
+    application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(VIEWMODE_BUTTON_TEXT)}$"), viewmode_prompt))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(FAVORITES_BUTTON_TEXT)}$"), favorites_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(STATS_BUTTON_TEXT)}$"), stats_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(REMINDER_BUTTON_TEXT)}$"), reminder_menu_cmd))
