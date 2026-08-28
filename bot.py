@@ -51,7 +51,7 @@ meta = MetaStore(GITHUB_TOKEN, GITHUB_REPO)
 # Меняй эту строку при каждом изменении набора кнопок внизу экрана —
 # бот сам один раз попросит всех известных пользователей написать любое слово,
 # чтобы у них обновилась клавиатура.
-KEYBOARD_VERSION = "v5-favorites-stats-reminders"
+KEYBOARD_VERSION = "v6-admin-user-buttons-split"
 
 REMINDER_BUTTON_TEXT = "⏰ Напоминания"
 FAVORITES_BUTTON_TEXT = "⭐ Избранное"
