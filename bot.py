@@ -63,6 +63,7 @@ EXPORT_BUTTON_TEXT = "📦 Скачать все (ZIP)"
 TEXT_CARD_BUTTON_TEXT = "✍️ Текстовая карточка"
 MODE_BUTTON_TEXT = "🔀 Режим показа"
 VIEWMODE_BUTTON_TEXT = "👁 Я админ / Я пользователь"
+MERGE_BUTTON_TEXT = "🔗 Объединить карточки"
 
 DRAW_BUTTON = ReplyKeyboardMarkup(
     [
@@ -73,6 +74,7 @@ DRAW_BUTTON = ReplyKeyboardMarkup(
         [DELETE_BUTTON_TEXT, DELETE_ALL_BUTTON_TEXT],
         [EXPORT_BUTTON_TEXT, TEXT_CARD_BUTTON_TEXT],
         [VIEWMODE_BUTTON_TEXT],
+        [MERGE_BUTTON_TEXT],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -248,7 +250,54 @@ async def text_card_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Пришли текст — я оформлю его в карточку.", reply_markup=DRAW_BUTTON)
 
 
+async def merge_cards_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_admin(update.effective_user.id):
+        return
+    context.user_data["awaiting_merge_numbers"] = True
+    await update.message.reply_text(
+        "Пришли номера карточек в том порядке, в котором их нужно объединить, через запятую (например: 5,3,11).",
+        reply_markup=DRAW_BUTTON,
+    )
+
+
 async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if _is_admin(update.effective_user.id) and context.user_data.get("awaiting_merge_numbers"):
+        context.user_data["awaiting_merge_numbers"] = False
+        text = (update.message.text or "").strip()
+        parts = [p.strip() for p in text.split(",") if p.strip()]
+        if len(parts) < 2 or not all(p.isdigit() for p in parts):
+            await update.message.reply_text(
+                "Нужно минимум два номера через запятую, например: 5,3,11.", reply_markup=DRAW_BUTTON
+            )
+            return
+        ids_in_order = [int(p) for p in parts]
+        if len(set(ids_in_order)) != len(ids_in_order):
+            await update.message.reply_text("В списке есть повторяющиеся номера — пришли ещё раз без повторов.", reply_markup=DRAW_BUTTON)
+            return
+        cards_in_order = []
+        missing = []
+        for cid in ids_in_order:
+            card = next((c for c in storage.cards if c["id"] == cid), None)
+            if card is None:
+                missing.append(cid)
+            else:
+                cards_in_order.append(card)
+        if missing:
+            await update.message.reply_text(f"Не нашла карточки: {missing}. Ничего не объединяю.", reply_markup=DRAW_BUTTON)
+            return
+        combined_file_ids = []
+        for card in cards_in_order:
+            combined_file_ids.extend(card_file_ids(card))
+        kind = cards_in_order[0].get("kind", "photo")
+        new_id = storage.add_multi_card(combined_file_ids, kind=kind)
+        for cid in ids_in_order:
+            storage.delete_card(cid)
+        await update.message.reply_text(
+            f"Объединено! Новая карточка #{new_id} ({len(combined_file_ids)} стр.) из карточек {ids_in_order}. "
+            f"Всего карточек: {storage.count()}.",
+            reply_markup=DRAW_BUTTON,
+        )
+        return
     if _is_admin(update.effective_user.id) and context.user_data.get("awaiting_delete_number"):
         context.user_data["awaiting_delete_number"] = False
         text = (update.message.text or "").strip()
@@ -1197,6 +1246,7 @@ async def main():
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(MODE_BUTTON_TEXT)}$"), mode_prompt))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(VIEWMODE_BUTTON_TEXT)}$"), viewmode_prompt))
+    application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(MERGE_BUTTON_TEXT)}$"), merge_cards_prompt))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(FAVORITES_BUTTON_TEXT)}$"), favorites_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(STATS_BUTTON_TEXT)}$"), stats_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(REMINDER_BUTTON_TEXT)}$"), reminder_menu_cmd))
