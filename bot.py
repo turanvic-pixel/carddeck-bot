@@ -446,6 +446,9 @@ def compute_content_hash(raw_bytes: bytes) -> str:
 _media_group_buffers: dict = {}
 
 
+_pending_group_choices: dict = {}
+
+
 async def _flush_media_group(context: ContextTypes.DEFAULT_TYPE):
     group_id = context.job.data["group_id"]
     buf = _media_group_buffers.pop(group_id, None)
@@ -454,23 +457,80 @@ async def _flush_media_group(context: ContextTypes.DEFAULT_TYPE):
     chat_id = buf["chat_id"]
     file_ids = buf["file_ids"]
     kind = buf["kind"]
-    phash = compute_phash(buf["first_raw"]) if buf.get("first_raw") else None
-    content_hash = compute_content_hash(buf["first_raw"]) if buf.get("first_raw") else None
 
-    dup = storage.find_duplicate(content_hash=content_hash) if content_hash else None
-    if dup:
+    if len(file_ids) == 1:
+        phash = compute_phash(buf["first_raw"]) if buf.get("first_raw") else None
+        content_hash = compute_content_hash(buf["first_raw"]) if buf.get("first_raw") else None
+        dup = storage.find_duplicate(content_hash=content_hash) if content_hash else None
+        if dup:
+            await context.bot.send_message(
+                chat_id=chat_id, text=f"Такая карточка уже есть — #{dup['id']}. Не добавляю дубликат.", reply_markup=DRAW_BUTTON
+            )
+            return
+        new_id = storage.add_card(file_ids[0], kind=kind, phash=phash, content_hash=content_hash)
         await context.bot.send_message(
-            chat_id=chat_id, text=f"Такая карточка уже есть — #{dup['id']}. Не добавляю дубликат.", reply_markup=DRAW_BUTTON
+            chat_id=chat_id,
+            text=f"Добавлено! Карточка #{new_id}. Всего карточек: {storage.count()}.",
+            reply_markup=DRAW_BUTTON,
         )
         return
 
-    if len(file_ids) == 1:
-        new_id = storage.add_card(file_ids[0], kind=kind, phash=phash, content_hash=content_hash)
-    else:
-        new_id = storage.add_multi_card(file_ids, kind=kind, phash=phash, content_hash=content_hash)
+    # несколько фото — спрашиваем, как их сохранить, а не решаем автоматически
+    _pending_group_choices[group_id] = buf
+    kb = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton(f"📑 Отдельными ({len(file_ids)})", callback_data=f"splitgroup:{group_id}"),
+            InlineKeyboardButton(f"📖 Одной карточкой ({len(file_ids)} стр.)", callback_data=f"combinegroup:{group_id}"),
+        ]]
+    )
     await context.bot.send_message(
-        chat_id=chat_id,
-        text=f"Добавлено ({len(file_ids)} фото)! Карточка #{new_id}. Всего карточек: {storage.count()}.",
+        chat_id=chat_id, text=f"Прислано {len(file_ids)} фото. Как сохранить?", reply_markup=kb
+    )
+
+
+async def group_choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if update.effective_user.id != ADMIN_ID:
+        await query.answer()
+        return
+    await query.answer()
+    action, key = query.data.split(":", 1)
+    buf = _pending_group_choices.pop(key, None)
+    if not buf:
+        await query.message.reply_text("Эти карточки уже обработаны или устарели.", reply_markup=DRAW_BUTTON)
+        return
+    file_ids = buf["file_ids"]
+    kind = buf["kind"]
+    phash = compute_phash(buf["first_raw"]) if buf.get("first_raw") else None
+    content_hash = compute_content_hash(buf["first_raw"]) if buf.get("first_raw") else None
+
+    if action == "splitgroup":
+        added = 0
+        skipped = []
+        for i, fid in enumerate(file_ids):
+            if i == 0 and content_hash:
+                dup = storage.find_duplicate(content_hash=content_hash)
+                if dup:
+                    skipped.append(dup["id"])
+                    continue
+            storage.add_card(fid, kind=kind)
+            added += 1
+        msg = f"Добавлено отдельными карточками: {added}."
+        if skipped:
+            msg += f" Пропущено как дубликат: {skipped}."
+        await query.message.reply_text(msg, reply_markup=DRAW_BUTTON)
+        return
+
+    # combinegroup
+    dup = storage.find_duplicate(content_hash=content_hash) if content_hash else None
+    if dup:
+        await query.message.reply_text(
+            f"Такая карточка уже есть — #{dup['id']}. Не добавляю дубликат.", reply_markup=DRAW_BUTTON
+        )
+        return
+    new_id = storage.add_multi_card(file_ids, kind=kind, phash=phash, content_hash=content_hash)
+    await query.message.reply_text(
+        f"Добавлено одной карточкой ({len(file_ids)} стр.)! Карточка #{new_id}. Всего карточек: {storage.count()}.",
         reply_markup=DRAW_BUTTON,
     )
 
@@ -908,6 +968,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(reminder_callback, pattern="^remind_"))
     application.add_handler(CallbackQueryHandler(delete_confirm_callback, pattern="^(confirmdel:|canceldel$)"))
     application.add_handler(CallbackQueryHandler(delete_all_confirm_callback, pattern="^(confirmdeleteall$|canceldeleteall$)"))
+    application.add_handler(CallbackQueryHandler(group_choice_callback, pattern="^(splitgroup:|combinegroup:)"))
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(FAVORITES_BUTTON_TEXT)}$"), favorites_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(STATS_BUTTON_TEXT)}$"), stats_cmd))
