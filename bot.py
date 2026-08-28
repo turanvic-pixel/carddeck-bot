@@ -294,29 +294,28 @@ async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(set(ids_in_order)) != len(ids_in_order):
             await update.message.reply_text("В списке есть повторяющиеся номера — пришли ещё раз без повторов.", reply_markup=DRAW_BUTTON)
             return
-        cards_in_order = []
-        missing = []
-        for cid in ids_in_order:
-            card = next((c for c in storage.cards if c["id"] == cid), None)
-            if card is None:
-                missing.append(cid)
-            else:
-                cards_in_order.append(card)
+        missing = [cid for cid in ids_in_order if not any(c["id"] == cid for c in storage.cards)]
         if missing:
             await update.message.reply_text(f"Не нашла карточки: {missing}. Ничего не объединяю.", reply_markup=DRAW_BUTTON)
             return
-        combined_file_ids = []
-        for card in cards_in_order:
-            combined_file_ids.extend(card_file_ids(card))
-        kind = cards_in_order[0].get("kind", "photo")
-        new_id = storage.add_multi_card(combined_file_ids, kind=kind)
+        # показываем превью каждой карточки (первую страницу), чтобы можно было свериться
         for cid in ids_in_order:
-            storage.delete_card(cid)
-        await update.message.reply_text(
-            f"Объединено! Новая карточка #{new_id} ({len(combined_file_ids)} стр.) из карточек {ids_in_order}. "
-            f"Всего карточек: {storage.count()}.",
-            reply_markup=DRAW_BUTTON,
+            card = next(c for c in storage.cards if c["id"] == cid)
+            first_fid = card_file_ids(card)[0]
+            if card.get("kind") == "document":
+                await update.message.reply_document(document=first_fid, caption=f"#{cid}")
+            else:
+                await update.message.reply_photo(photo=first_fid, caption=f"#{cid}")
+        key = uuid.uuid4().hex[:12]
+        _pending_merge_choices[key] = ids_in_order
+        order_str = " → ".join(f"#{i}" for i in ids_in_order)
+        kb = InlineKeyboardMarkup(
+            [[
+                InlineKeyboardButton("✅ Да, объединить", callback_data=f"confirmmerge:{key}"),
+                InlineKeyboardButton("❌ Отмена", callback_data=f"cancelmerge:{key}"),
+            ]]
         )
+        await update.message.reply_text(f"Объединить карточки в этом порядке: {order_str}?", reply_markup=kb)
         return
     if _is_admin(update.effective_user.id) and context.user_data.get("awaiting_delete_number"):
         context.user_data["awaiting_delete_number"] = False
@@ -647,6 +646,56 @@ import uuid
 
 _pending_group_choices: dict = {}
 _pending_duplicate_adds: dict = {}
+_pending_merge_choices: dict = {}
+
+
+async def merge_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not _is_admin(update.effective_user.id):
+        await query.answer()
+        return
+    await query.answer()
+    action, key = query.data.split(":", 1)
+    ids_in_order = _pending_merge_choices.pop(key, None)
+    if action == "cancelmerge":
+        await query.message.reply_text("Отменено, ничего не объединяю.", reply_markup=DRAW_BUTTON)
+        return
+    if not ids_in_order:
+        await query.message.reply_text("Этот запрос уже устарел — начни заново через кнопку.", reply_markup=DRAW_BUTTON)
+        return
+    cards_in_order = []
+    missing = []
+    for cid in ids_in_order:
+        card = next((c for c in storage.cards if c["id"] == cid), None)
+        if card is None:
+            missing.append(cid)
+        else:
+            cards_in_order.append(card)
+    if missing:
+        await query.message.reply_text(f"Не нашла карточки: {missing}. Ничего не объединяю.", reply_markup=DRAW_BUTTON)
+        return
+    combined_file_ids = []
+    for card in cards_in_order:
+        combined_file_ids.extend(card_file_ids(card))
+    kind = cards_in_order[0].get("kind", "photo")
+    new_id = storage.add_multi_card(combined_file_ids, kind=kind)
+    for cid in ids_in_order:
+        storage.delete_card(cid)
+    await query.message.reply_text(
+        f"Объединено! Новая карточка #{new_id} ({len(combined_file_ids)} стр.) из карточек {ids_in_order}. "
+        f"Всего карточек: {storage.count()}.",
+    )
+    # показываем саму получившуюся карточку для визуальной проверки
+    for i, fid in enumerate(combined_file_ids):
+        is_last = i == len(combined_file_ids) - 1
+        if kind == "document":
+            await query.message.reply_document(
+                document=fid, caption=f"Карточка #{new_id}" if is_last else None, reply_markup=DRAW_BUTTON if is_last else None
+            )
+        else:
+            await query.message.reply_photo(
+                photo=fid, caption=f"Карточка #{new_id}" if is_last else None, reply_markup=DRAW_BUTTON if is_last else None
+            )
 
 
 async def _ask_duplicate_confirmation(bot, chat_id, existing_card: dict, pending_data: dict):
@@ -1295,6 +1344,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(delete_all_confirm_callback, pattern="^(confirmdeleteall$|canceldeleteall$)"))
     application.add_handler(CallbackQueryHandler(group_choice_callback, pattern="^(splitgroup:|combinegroup:)"))
     application.add_handler(CallbackQueryHandler(duplicate_confirm_callback, pattern="^(forceadd:|skipadd:)"))
+    application.add_handler(CallbackQueryHandler(merge_confirm_callback, pattern="^(confirmmerge:|cancelmerge:)"))
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(MODE_BUTTON_TEXT)}$"), mode_prompt))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(VIEWMODE_BUTTON_TEXT)}$"), viewmode_prompt))
