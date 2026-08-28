@@ -681,6 +681,17 @@
       "kind": "photo",
       "phash": "9e33a619cd33cc31",
       "content_hash": "80a2b99eb9b8e6b434f7a1041362d72c9f69dd941ba595f1b5e00ef1ad41cc74"
+    },
+    {
+      "id": 107,
+      "file_ids": [
+        "PAGE_140189921056528",
+        "PAGE_140189921056528",
+        "PAGE_140189921056528",
+        "PAGE_140189921056528"
+      ],
+      "kind": "photo",
+      "content_hash": "510a4002d7f1fe89f2580af143051e238a399e30ccfc2026b83dba59d3258d1f"
     }
   ]
 }
