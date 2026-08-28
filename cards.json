@@ -69,6 +69,11 @@
       "id": 14,
       "file_id": "X1",
       "kind": "photo"
+    },
+    {
+      "id": 15,
+      "file_id": "X2",
+      "kind": "photo"
     }
   ]
 }
