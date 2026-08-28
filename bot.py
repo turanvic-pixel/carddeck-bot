@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import hashlib
 import io
 import logging
 import os
@@ -311,6 +312,10 @@ def compute_phash(raw_bytes: bytes) -> str | None:
         return None
 
 
+def compute_content_hash(raw_bytes: bytes) -> str:
+    return hashlib.sha256(raw_bytes).hexdigest()
+
+
 # Буфер альбомов: несколько фото/файлов, присланных одним альбомом (media_group_id),
 # собираются в одну карточку — все страницы показываются потом одна за другой.
 _media_group_buffers: dict = {}
@@ -325,8 +330,9 @@ async def _flush_media_group(context: ContextTypes.DEFAULT_TYPE):
     file_ids = buf["file_ids"]
     kind = buf["kind"]
     phash = compute_phash(buf["first_raw"]) if buf.get("first_raw") else None
+    content_hash = compute_content_hash(buf["first_raw"]) if buf.get("first_raw") else None
 
-    dup = storage.find_duplicate(phash) if phash else None
+    dup = storage.find_duplicate(content_hash=content_hash) if content_hash else None
     if dup:
         await context.bot.send_message(
             chat_id=chat_id, text=f"Такая карточка уже есть — #{dup['id']}. Не добавляю дубликат.", reply_markup=DRAW_BUTTON
@@ -334,9 +340,9 @@ async def _flush_media_group(context: ContextTypes.DEFAULT_TYPE):
         return
 
     if len(file_ids) == 1:
-        new_id = storage.add_card(file_ids[0], kind=kind)
+        new_id = storage.add_card(file_ids[0], kind=kind, phash=phash, content_hash=content_hash)
     else:
-        new_id = storage.add_multi_card(file_ids, kind=kind)
+        new_id = storage.add_multi_card(file_ids, kind=kind, phash=phash, content_hash=content_hash)
     await context.bot.send_message(
         chat_id=chat_id,
         text=f"Добавлено ({len(file_ids)} фото)! Карточка #{new_id}. Всего карточек: {storage.count()}.",
@@ -375,13 +381,14 @@ async def admin_add_card_photo(update: Update, context: ContextTypes.DEFAULT_TYP
     tg_file = await context.bot.get_file(photo.file_id)
     raw = await tg_file.download_as_bytearray()
     phash = compute_phash(bytes(raw))
-    dup = storage.find_duplicate(phash)
+    content_hash = compute_content_hash(bytes(raw))
+    dup = storage.find_duplicate(content_hash=content_hash)
     if dup:
         await update.message.reply_text(
             f"Такая карточка уже есть — #{dup['id']}. Не добавляю дубликат.", reply_markup=DRAW_BUTTON
         )
         return
-    new_id = storage.add_card(photo.file_id, kind="photo", phash=phash)
+    new_id = storage.add_card(photo.file_id, kind="photo", phash=phash, content_hash=content_hash)
     await update.message.reply_text(
         f"Добавлено! Карточка #{new_id}. Всего карточек: {storage.count()}.",
         reply_markup=DRAW_BUTTON,
@@ -419,13 +426,14 @@ async def admin_add_card_document(update: Update, context: ContextTypes.DEFAULT_
         return
 
     phash = compute_phash(bytes(raw))
-    dup = storage.find_duplicate(phash)
+    content_hash = compute_content_hash(bytes(raw))
+    dup = storage.find_duplicate(content_hash=content_hash)
     if dup:
         await update.message.reply_text(
             f"Такая карточка уже есть — #{dup['id']}. Не добавляю дубликат.", reply_markup=DRAW_BUTTON
         )
         return
-    new_id = storage.add_card(photo_file_id, kind="photo", phash=phash)
+    new_id = storage.add_card(photo_file_id, kind="photo", phash=phash, content_hash=content_hash)
     await update.message.reply_text(
         f"Добавлено (оптимизировано)! Карточка #{new_id}. Всего карточек: {storage.count()}.",
         reply_markup=DRAW_BUTTON,
@@ -447,12 +455,14 @@ async def reprocess_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tg_file = await context.bot.get_file(card["file_id"])
             raw = await tg_file.download_as_bytearray()
             phash = compute_phash(bytes(raw))
+            content_hash = compute_content_hash(bytes(raw))
             optimized = optimize_image_bytes(bytes(raw))
             sent = await context.bot.send_photo(chat_id=ADMIN_ID, photo=io.BytesIO(optimized))
             card["file_id"] = sent.photo[-1].file_id
             card["kind"] = "photo"
             if phash:
                 card["phash"] = phash
+            card["content_hash"] = content_hash
             fixed += 1
         except Exception as e:
             logger.warning("Не удалось пересобрать карточку #%s: %s", card["id"], e)
@@ -460,6 +470,38 @@ async def reprocess_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if fixed > 0:
         storage.persist(f"reprocess {fixed} document-cards into optimized photo cards")
     msg = f"Готово! Пересобрано: {fixed}."
+    if failed:
+        msg += f" Не получилось: {failed}."
+    await update.message.reply_text(msg, reply_markup=DRAW_BUTTON)
+
+
+async def hash_missing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    missing = [c for c in storage.cards if not c.get("content_hash")]
+    if not missing:
+        await update.message.reply_text("У всех карточек уже есть хэш для проверки дублей.")
+        return
+    await update.message.reply_text(f"Считаю хэш для {len(missing)} карточек...")
+    fixed = 0
+    failed = []
+    for card in missing:
+        try:
+            first_file_id = card_file_ids(card)[0]
+            tg_file = await context.bot.get_file(first_file_id)
+            raw = await tg_file.download_as_bytearray()
+            content_hash = compute_content_hash(bytes(raw))
+            phash = compute_phash(bytes(raw))
+            card["content_hash"] = content_hash
+            if phash:
+                card["phash"] = phash
+            fixed += 1
+        except Exception as e:
+            logger.warning("Не удалось посчитать хэш для карточки #%s: %s", card["id"], e)
+            failed.append(card["id"])
+    if fixed > 0:
+        storage.persist(f"backfill content_hash for {fixed} cards")
+    msg = f"Готово! Хэш посчитан для {fixed} карточек."
     if failed:
         msg += f" Не получилось: {failed}."
     await update.message.reply_text(msg, reply_markup=DRAW_BUTTON)
@@ -731,6 +773,7 @@ async def main():
     application.add_handler(CommandHandler("whoami", whoami))
     application.add_handler(CommandHandler("export", export_cmd))
     application.add_handler(CommandHandler("reprocess", reprocess_cmd))
+    application.add_handler(CommandHandler("hash_missing", hash_missing_cmd))
     application.add_handler(CommandHandler("hash_missing", hash_missing_cmd))
     application.add_handler(CommandHandler("favorites", favorites_cmd))
     application.add_handler(CommandHandler("remind_on", remind_on_cmd))
