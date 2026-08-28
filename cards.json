@@ -228,17 +228,6 @@
       "kind": "photo",
       "phash": "8d5d76b206635297",
       "content_hash": "af5fe67bff0bc69c6b2fec5ace46ca05a17961427f8f0f839d23a287a198c2bb"
-    },
-    {
-      "id": 41,
-      "file_ids": [
-        "AgACAgIAAxkBAAIF-WqQ7sToFXGjIjtjHiN7fWY9wpxFAAKDLWsbskqBSAyat4-Vq9vbAQADAgADeQADPQQ",
-        "AgACAgIAAxkBAAIF-mqQ7sRbz70eUvNuUoUJNxb2OjSrAAKELWsbskqBSApdGV7CMOYDAQADAgADeQADPQQ",
-        "AgACAgIAAxkBAAIF-2qQ7sQeU1YyFYVnL2GROA3-kFXHAAKFLWsbskqBSPtL5jAZ5eU3AQADAgADeQADPQQ"
-      ],
-      "kind": "photo",
-      "phash": "b199cb67c6649c92",
-      "content_hash": "9f2fcfbb3d9a6337e17b161085c2437534692ad23f09a548af65aa7bb4997010"
     }
   ]
 }
