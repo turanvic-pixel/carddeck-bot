@@ -681,15 +681,6 @@
       "kind": "photo",
       "phash": "9e33a619cd33cc31",
       "content_hash": "80a2b99eb9b8e6b434f7a1041362d72c9f69dd941ba595f1b5e00ef1ad41cc74"
-    },
-    {
-      "id": 110,
-      "file_ids": [
-        "MERGE_TEST_C",
-        "MERGE_TEST_A",
-        "MERGE_TEST_B"
-      ],
-      "kind": "photo"
     }
   ]
 }
