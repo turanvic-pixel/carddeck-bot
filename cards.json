@@ -1,3 +1,14 @@
 {
-  "cards": []
+  "cards": [
+    {
+      "id": 1,
+      "file_ids": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "kind": "photo",
+      "content_hash": "4e672e14a6367a1d28f904ffdaeea87affae73a0436d7475349fec358317613e"
+    }
+  ]
 }
