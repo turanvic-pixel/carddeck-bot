@@ -683,11 +683,6 @@
       "content_hash": "80a2b99eb9b8e6b434f7a1041362d72c9f69dd941ba595f1b5e00ef1ad41cc74"
     },
     {
-      "id": 108,
-      "file_id": "MERGE_TEST_B",
-      "kind": "photo"
-    },
-    {
       "id": 110,
       "file_ids": [
         "MERGE_TEST_C",
