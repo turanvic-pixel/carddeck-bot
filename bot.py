@@ -1333,9 +1333,13 @@ async def send_daily_card(context: ContextTypes.DEFAULT_TYPE):
         is_last = i == len(file_ids) - 1
         cap = "🌅 Карточка дня" if is_last else None
         if card.get("kind") == "document":
-            await context.bot.send_document(chat_id=chat_id, document=fid, caption=cap, reply_markup=kb if is_last else None)
+            await context.bot.send_document(
+                chat_id=chat_id, document=fid, caption=cap, reply_markup=kb if is_last else None, protect_content=True
+            )
         else:
-            await context.bot.send_photo(chat_id=chat_id, photo=fid, caption=cap, reply_markup=kb if is_last else None)
+            await context.bot.send_photo(
+                chat_id=chat_id, photo=fid, caption=cap, reply_markup=kb if is_last else None, protect_content=True
+            )
 
 
 TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
