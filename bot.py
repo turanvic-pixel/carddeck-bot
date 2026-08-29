@@ -1005,38 +1005,22 @@ async def admin_add_card_photo(update: Update, context: ContextTypes.DEFAULT_TYP
     if not _is_admin(update.effective_user.id):
         return
     photo = update.message.photo[-1]
-    group_id = update.message.media_group_id
-    if group_id:
-        is_new = group_id not in _media_group_buffers
-        buf = _media_group_buffers.setdefault(
-            group_id, {"file_ids": [], "kind": "photo", "chat_id": update.effective_chat.id}
-        )
-        if is_new:
-            try:
-                tg_file = await context.bot.get_file(photo.file_id)
-                buf["first_raw"] = bytes(await tg_file.download_as_bytearray())
-            except Exception:
-                logger.exception("Не удалось скачать первое фото альбома")
-        buf["file_ids"].append(photo.file_id)
-        _schedule_media_group_flush(context, group_id)
-        return
-
-    tg_file = await context.bot.get_file(photo.file_id)
-    raw = await tg_file.download_as_bytearray()
-    phash = compute_phash(bytes(raw))
-    content_hash = compute_content_hash(bytes(raw))
-    dup = storage.find_duplicate(content_hash=content_hash)
-    if dup:
-        await _ask_duplicate_confirmation(
-            context.bot, update.effective_chat.id, dup,
-            {"file_id": photo.file_id, "kind": "photo", "phash": phash, "content_hash": content_hash},
-        )
-        return
-    new_id = storage.add_card(photo.file_id, kind="photo", phash=phash, content_hash=content_hash)
-    await update.message.reply_text(
-        f"Добавлено! Карточка #{new_id}. Всего карточек: {storage.count()}.",
-        reply_markup=DRAW_BUTTON,
+    # Telegram не всегда присылает media_group_id (проверено на реальных данных: для документов
+    # он систематически пустой даже при явной отправке пачкой). Если его нет, группируем сами
+    # по синтетическому ключу — та же логика буферизации без зависимости от Telegram.
+    group_id = update.message.media_group_id or f"solo:{update.effective_chat.id}"
+    is_new = group_id not in _media_group_buffers
+    buf = _media_group_buffers.setdefault(
+        group_id, {"file_ids": [], "kind": "photo", "chat_id": update.effective_chat.id}
     )
+    if is_new:
+        try:
+            tg_file = await context.bot.get_file(photo.file_id)
+            buf["first_raw"] = bytes(await tg_file.download_as_bytearray())
+        except Exception:
+            logger.exception("Не удалось скачать первое фото альбома")
+    buf["file_ids"].append(photo.file_id)
+    _schedule_media_group_flush(context, group_id)
 
 
 async def admin_add_card_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1099,7 +1083,9 @@ async def admin_add_card_document(update: Update, context: ContextTypes.DEFAULT_
         return
     tg_file = await context.bot.get_file(doc.file_id)
     raw = await tg_file.download_as_bytearray()
-    group_id = update.message.media_group_id
+    # см. комментарий в admin_add_card_photo: media_group_id от Telegram для документов
+    # на практике систематически пустой, поэтому группируем сами по синтетическому ключу.
+    group_id = update.message.media_group_id or f"solo:{update.effective_chat.id}"
 
     try:
         optimized = optimize_image_bytes(bytes(raw))
@@ -1110,31 +1096,14 @@ async def admin_add_card_document(update: Update, context: ContextTypes.DEFAULT_
     sent = await update.message.reply_photo(photo=io.BytesIO(optimized))
     photo_file_id = sent.photo[-1].file_id
 
-    if group_id:
-        is_new = group_id not in _media_group_buffers
-        buf = _media_group_buffers.setdefault(
-            group_id, {"file_ids": [], "kind": "photo", "chat_id": update.effective_chat.id}
-        )
-        if is_new:
-            buf["first_raw"] = bytes(raw)
-        buf["file_ids"].append(photo_file_id)
-        _schedule_media_group_flush(context, group_id)
-        return
-
-    phash = compute_phash(bytes(raw))
-    content_hash = compute_content_hash(bytes(raw))
-    dup = storage.find_duplicate(content_hash=content_hash)
-    if dup:
-        await _ask_duplicate_confirmation(
-            context.bot, update.effective_chat.id, dup,
-            {"file_id": photo_file_id, "kind": "photo", "phash": phash, "content_hash": content_hash},
-        )
-        return
-    new_id = storage.add_card(photo_file_id, kind="photo", phash=phash, content_hash=content_hash)
-    await update.message.reply_text(
-        f"Добавлено (оптимизировано)! Карточка #{new_id}. Всего карточек: {storage.count()}.",
-        reply_markup=DRAW_BUTTON,
+    is_new = group_id not in _media_group_buffers
+    buf = _media_group_buffers.setdefault(
+        group_id, {"file_ids": [], "kind": "photo", "chat_id": update.effective_chat.id}
     )
+    if is_new:
+        buf["first_raw"] = bytes(raw)
+    buf["file_ids"].append(photo_file_id)
+    _schedule_media_group_flush(context, group_id)
 
 
 async def reprocess_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
