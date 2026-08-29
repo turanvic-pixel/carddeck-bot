@@ -208,6 +208,7 @@ async def title_card_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Пришли номер карточки и название через пробел, например: 1 Две точки\n"
         "Можно сразу несколько — каждую пару номер+название с новой строки.\n"
+        "Если пришлёшь просто номер без названия — покажу карточку, чтобы решить, как назвать.\n"
         "Название видно всем пользователям после номера карточки.",
         reply_markup=DRAW_BUTTON,
     )
@@ -457,8 +458,27 @@ async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
         return
     if _is_admin(update.effective_user.id) and context.user_data.get("awaiting_title_input"):
-        context.user_data["awaiting_title_input"] = False
         text = (update.message.text or "").strip()
+        if text.isdigit():
+            # прислали просто номер без названия — показываем карточку и снова просим название,
+            # а не ругаемся на формат: логично сперва посмотреть, что называешь
+            card_id = int(text)
+            card = next((c for c in storage.cards if c["id"] == card_id), None)
+            if card is None:
+                await update.message.reply_text(f"Карточка #{card_id} не найдена.", reply_markup=DRAW_BUTTON)
+                context.user_data["awaiting_title_input"] = False
+                return
+            caption = card_caption(card)
+            file_ids = card_file_ids(card)
+            for i, fid in enumerate(file_ids):
+                is_last = i == len(file_ids) - 1
+                if card.get("kind") == "document":
+                    await update.message.reply_document(document=fid, caption=caption if is_last else None)
+                else:
+                    await update.message.reply_photo(photo=fid, caption=caption if is_last else None)
+            await update.message.reply_text(f"Пришли название для карточки #{card_id}.", reply_markup=DRAW_BUTTON)
+            return  # awaiting_title_input остаётся True — ждём теперь уже "номер название"
+        context.user_data["awaiting_title_input"] = False
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         mapping = {}
         bad_lines = []
