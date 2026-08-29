@@ -181,11 +181,37 @@ async def view_card_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Пришли номер карточки, которую хочешь посмотреть.", reply_markup=DRAW_BUTTON)
 
 
+def parse_card_selection(text: str, valid_ids: list) -> list:
+    """Разбирает ввод вида '5,7,12-15' или 'все'/'all' в список существующих номеров карточек."""
+    text = text.strip().lower()
+    valid_set = set(valid_ids)
+    if text in ("все", "всё", "all"):
+        return sorted(valid_set)
+    result = set()
+    for part in text.replace(" ", "").split(","):
+        if not part:
+            continue
+        if "-" in part:
+            a, b = part.split("-", 1)
+            if a.isdigit() and b.isdigit():
+                lo, hi = int(a), int(b)
+                if lo > hi:
+                    lo, hi = hi, lo
+                result.update(range(lo, hi + 1))
+        elif part.isdigit():
+            result.add(int(part))
+    return sorted(i for i in result if i in valid_set)
+
+
 async def delete_card_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_admin(update.effective_user.id):
         return
     context.user_data["awaiting_delete_number"] = True
-    await update.message.reply_text("Пришли номер карточки, которую нужно удалить.", reply_markup=DRAW_BUTTON)
+    await update.message.reply_text(
+        "Пришли номер карточки, которую нужно удалить. "
+        "Можно несколько через запятую (5,7,12) или диапазон (12-15).",
+        reply_markup=DRAW_BUTTON,
+    )
 
 
 def _delete_confirm_keyboard(card_id: int) -> InlineKeyboardMarkup:
@@ -211,6 +237,50 @@ async def _prompt_delete_confirmation(message, card_id: int):
             await message.reply_document(document=fid, caption=caption if is_last else None, reply_markup=kb if is_last else None)
         else:
             await message.reply_photo(photo=fid, caption=caption if is_last else None, reply_markup=kb if is_last else None)
+
+
+_pending_bulk_delete: dict = {}
+
+
+async def _prompt_bulk_delete_confirmation(message, ids: list):
+    """Подтверждение удаления сразу нескольких карточек (список или диапазон номеров)."""
+    key = uuid.uuid4().hex[:12]
+    _pending_bulk_delete[key] = ids
+    ids_str = ", ".join(f"#{i}" for i in ids)
+    kb = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton(f"✅ Да, удалить {len(ids)}", callback_data=f"confirmbulkdel:{key}"),
+            InlineKeyboardButton("❌ Отмена", callback_data=f"cancelbulkdel:{key}"),
+        ]]
+    )
+    await message.reply_text(f"Удалить карточки {ids_str} ({len(ids)} шт.)?", reply_markup=kb)
+
+
+async def bulk_delete_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not _is_admin(update.effective_user.id):
+        await query.answer()
+        return
+    await query.answer()
+    action, key = query.data.split(":", 1)
+    ids = _pending_bulk_delete.pop(key, None)
+    if not ids:
+        await query.message.reply_text("Этот запрос уже устарел.", reply_markup=DRAW_BUTTON)
+        return
+    if action == "cancelbulkdel":
+        await query.message.reply_text("Отменено, карточки на месте.", reply_markup=DRAW_BUTTON)
+        return
+    deleted = []
+    not_found = []
+    for cid in ids:
+        if storage.delete_card(cid):
+            deleted.append(cid)
+        else:
+            not_found.append(cid)
+    msg = f"Удалено карточек: {len(deleted)}. Всего осталось: {storage.count()}."
+    if not_found:
+        msg += f" Не нашла: {not_found}."
+    await query.message.reply_text(msg, reply_markup=DRAW_BUTTON)
 
 
 async def delete_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -320,10 +390,18 @@ async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if _is_admin(update.effective_user.id) and context.user_data.get("awaiting_delete_number"):
         context.user_data["awaiting_delete_number"] = False
         text = (update.message.text or "").strip()
-        if not text.isdigit():
-            await update.message.reply_text("Это не похоже на номер карточки. Попробуй ещё раз через кнопку.", reply_markup=DRAW_BUTTON)
+        ids = parse_card_selection(text, storage.list_ids())
+        if not ids:
+            await update.message.reply_text(
+                "Это не похоже на номер карточки. Можно один номер (5), список через запятую (5,7,12) "
+                "или диапазон (12-15). Попробуй ещё раз через кнопку.",
+                reply_markup=DRAW_BUTTON,
+            )
             return
-        await _prompt_delete_confirmation(update.message, int(text))
+        if len(ids) == 1:
+            await _prompt_delete_confirmation(update.message, ids[0])
+        else:
+            await _prompt_bulk_delete_confirmation(update.message, ids)
         return
     if _is_admin(update.effective_user.id) and context.user_data.get("awaiting_view_number"):
         context.user_data["awaiting_view_number"] = False
@@ -1385,6 +1463,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(unfavorite_callback, pattern="^unfav:"))
     application.add_handler(CallbackQueryHandler(reminder_callback, pattern="^remind_"))
     application.add_handler(CallbackQueryHandler(delete_confirm_callback, pattern="^(confirmdel:|canceldel$)"))
+    application.add_handler(CallbackQueryHandler(bulk_delete_confirm_callback, pattern="^(confirmbulkdel:|cancelbulkdel:)"))
     application.add_handler(CallbackQueryHandler(delete_all_confirm_callback, pattern="^(confirmdeleteall$|canceldeleteall$)"))
     application.add_handler(CallbackQueryHandler(group_choice_callback, pattern="^(splitgroup:|combinegroup:)"))
     application.add_handler(CallbackQueryHandler(duplicate_confirm_callback, pattern="^(forceadd:|skipadd:)"))
