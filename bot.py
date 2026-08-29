@@ -91,8 +91,26 @@ ADMIN_DRAW_BUTTON = ReplyKeyboardMarkup(
     is_persistent=True,
 )
 
+# Когда админ включает "режим обычного пользователя" (чтобы проверить, что видят остальные),
+# ему нужна клавиатура БЕЗ админ-кнопок, но С кнопкой переключения обратно — иначе он теряет
+# к ней доступ через кнопки, хотя текст подсказки обещает "снова нажми эту кнопку".
+# Настоящим обычным пользователям эта кнопка не нужна и не показывается (USER_DRAW_BUTTON).
+ADMIN_AS_USER_DRAW_BUTTON = ReplyKeyboardMarkup(
+    [
+        ["💎 Открыть жемчужину души"],
+        [MODE_BUTTON_TEXT],
+        [FAVORITES_BUTTON_TEXT, STATS_BUTTON_TEXT],
+        [REMINDER_BUTTON_TEXT],
+        [VIEWMODE_BUTTON_TEXT],
+    ],
+    resize_keyboard=True,
+    is_persistent=True,
+)
+
 
 def keyboard_for(user_id: int) -> ReplyKeyboardMarkup:
+    if user_id == ADMIN_ID and user_id in _view_as_user:
+        return ADMIN_AS_USER_DRAW_BUTTON
     return ADMIN_DRAW_BUTTON if _is_admin(user_id) else USER_DRAW_BUTTON
 
 
