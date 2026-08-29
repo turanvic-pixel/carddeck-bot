@@ -144,13 +144,39 @@ class CardStorage:
             return self.next_sequential_card(user_id)
         return card
 
-    def delete_card(self, card_id: int) -> bool:
-        before = len(self.cards)
-        self.cards = [c for c in self.cards if c["id"] != card_id]
-        if len(self.cards) == before:
-            return False
-        self._save(f"delete card #{card_id}")
-        return True
+    def delete_card(self, card_id: int) -> tuple:
+        """Удаляет карточку и перенумеровывает оставшиеся без дыр (в одном коммите).
+        Возвращает (удалена_ли, mapping) — mapping {старый_id: новый_id} для карточек,
+        чей номер сдвинулся (нужно применить к favorites.py вызывающей стороне)."""
+        deleted, mapping = self.delete_cards([card_id])
+        return (card_id in deleted), mapping
+
+    def delete_cards(self, card_ids: list) -> tuple:
+        """Удаляет сразу несколько карточек и перенумеровывает оставшиеся без дыр
+        в ОДНОМ коммите (а не по одному на каждую). Возвращает (список реально
+        удалённых id, mapping {старый_id: новый_id} для карточек, чей номер сдвинулся)."""
+        id_set = set(card_ids)
+        existing_ids = {c["id"] for c in self.cards}
+        deleted = sorted(id_set & existing_ids)
+        if not deleted:
+            return [], {}
+        self.cards = [c for c in self.cards if c["id"] not in id_set]
+        mapping = self._renumber()
+        self._save(f"delete cards {deleted}, renumber {len(mapping)} shifted")
+        return deleted, mapping
+
+    def _renumber(self) -> dict:
+        """Сортирует карточки по текущему id и присваивает новые id 1..N без дыр.
+        Возвращает mapping {старый_id: новый_id} только для карточек, чей номер
+        реально изменился (пустой словарь, если дыр не было)."""
+        self.cards.sort(key=lambda c: c["id"])
+        mapping = {}
+        for i, card in enumerate(self.cards, start=1):
+            old_id = card["id"]
+            if old_id != i:
+                mapping[old_id] = i
+                card["id"] = i
+        return mapping
 
     def delete_all(self) -> int:
         count = len(self.cards)
@@ -216,6 +242,21 @@ class FavoritesStore:
         self.data[key] = favs
         self._save(f"favorite remove user={user_id} card={card_id}")
         return True
+
+    def remap_ids(self, mapping: dict):
+        """Применяет сдвиг номеров карточек (после удаления + перенумерации) ко всем
+        избранным — так карточка остаётся в избранном у пользователя, просто под новым
+        номером, а не теряется."""
+        if not mapping:
+            return
+        changed = False
+        for uid, ids in self.data.items():
+            new_ids = [mapping.get(i, i) for i in ids]
+            if new_ids != ids:
+                self.data[uid] = new_ids
+                changed = True
+        if changed:
+            self._save(f"remap {len(mapping)} favorite ids after renumber")
 
 
 class ReminderStore:
