@@ -702,6 +702,7 @@ async def _ask_duplicate_confirmation(bot, chat_id, existing_card: dict, pending
     """Показывает найденную похожую карточку и спрашивает — правда дубликат, или добавить всё равно."""
     key = uuid.uuid4().hex[:12]
     pending_data["chat_id"] = chat_id
+    pending_data["existing_id"] = existing_card["id"]
     _pending_duplicate_adds[key] = pending_data
     caption = f"Похоже на карточку #{existing_card['id']}. Это дубликат?"
     kb = InlineKeyboardMarkup(
@@ -755,9 +756,48 @@ async def duplicate_confirm_callback(update: Update, context: ContextTypes.DEFAU
             pending["file_id"], kind=pending.get("kind", "photo"),
             phash=pending.get("phash"), content_hash=pending.get("content_hash"),
         )
-    await query.message.reply_text(
-        f"Добавлено! Карточка #{new_id}. Всего карточек: {storage.count()}.", reply_markup=DRAW_BUTTON
+
+    old_id = pending.get("existing_id")
+    dkey = uuid.uuid4().hex[:12]
+    _pending_delete_old[dkey] = {"old_id": old_id}
+    dkb = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("🗑 Да, удалить старую", callback_data=f"delold:{dkey}"),
+            InlineKeyboardButton("Нет, оставить обе", callback_data=f"keepold:{dkey}"),
+        ]]
     )
+    await query.message.reply_text(
+        f"Добавлено! Карточка #{new_id}. Всего карточек: {storage.count()}.\n"
+        f"Удалить старую карточку #{old_id}?",
+        reply_markup=dkb,
+    )
+
+
+_pending_delete_old: dict = {}
+
+
+async def delete_old_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not _is_admin(update.effective_user.id):
+        await query.answer()
+        return
+    await query.answer()
+    action, key = query.data.split(":", 1)
+    pending = _pending_delete_old.pop(key, None)
+    if not pending:
+        await query.message.reply_text("Этот запрос уже устарел.", reply_markup=DRAW_BUTTON)
+        return
+    if action == "keepold":
+        await query.message.reply_text("Оставляю обе карточки.", reply_markup=DRAW_BUTTON)
+        return
+    old_id = pending["old_id"]
+    ok = storage.delete_card(old_id)
+    if ok:
+        await query.message.reply_text(
+            f"Старая карточка #{old_id} удалена. Всего карточек: {storage.count()}.", reply_markup=DRAW_BUTTON
+        )
+    else:
+        await query.message.reply_text(f"Не нашла карточку #{old_id} для удаления.", reply_markup=DRAW_BUTTON)
 
 
 async def _flush_media_group(context: ContextTypes.DEFAULT_TYPE):
@@ -1344,6 +1384,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(delete_all_confirm_callback, pattern="^(confirmdeleteall$|canceldeleteall$)"))
     application.add_handler(CallbackQueryHandler(group_choice_callback, pattern="^(splitgroup:|combinegroup:)"))
     application.add_handler(CallbackQueryHandler(duplicate_confirm_callback, pattern="^(forceadd:|skipadd:)"))
+    application.add_handler(CallbackQueryHandler(delete_old_confirm_callback, pattern="^(delold:|keepold:)"))
     application.add_handler(CallbackQueryHandler(merge_confirm_callback, pattern="^(confirmmerge:|cancelmerge:)"))
     application.add_handler(MessageHandler(filters.Regex("^💎 Открыть жемчужину души$"), draw_card))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(MODE_BUTTON_TEXT)}$"), mode_prompt))
