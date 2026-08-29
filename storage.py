@@ -22,6 +22,14 @@ def card_file_ids(card: dict) -> list:
     return [card["file_id"]]
 
 
+def card_caption(card: dict) -> str:
+    """Подпись карточки: номер, и если задано — название после него.
+    Видна всем пользователям (не только админу)."""
+    title = card.get("title")
+    base = f"Карточка #{card['id']}"
+    return f"{base} {title}" if title else base
+
+
 class CardStorage:
     """Хранит карточки (file_id фото + текст) в cards.json в GitHub-репозитории.
 
@@ -86,6 +94,15 @@ class CardStorage:
         self.cards.append(card)
         self._save(f"add multi-page card #{new_id} ({len(file_ids)} pages)")
         return new_id
+
+    def set_title(self, card_id: int, title: str) -> bool:
+        """Задаёт/меняет название карточки, показывается после номера всем пользователям."""
+        card = next((c for c in self.cards if c["id"] == card_id), None)
+        if card is None:
+            return False
+        card["title"] = title
+        self._save(f"set title for card #{card_id}: {title!r}")
+        return True
 
     def find_duplicate(self, phash: str | None = None, content_hash: str | None = None):
         """Дубликатом считается только карточка с ТЕМ ЖЕ точным содержимым файла (content_hash).

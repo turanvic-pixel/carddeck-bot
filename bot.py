@@ -22,7 +22,7 @@ from telegram.ext import (
     filters,
 )
 
-from storage import CardStorage, FavoritesStore, MetaStore, ReminderStore, UserStore, card_file_ids
+from storage import CardStorage, FavoritesStore, MetaStore, ReminderStore, UserStore, card_file_ids, card_caption
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("carddeck-bot")
@@ -64,6 +64,7 @@ TEXT_CARD_BUTTON_TEXT = "✍️ Текстовая карточка"
 MODE_BUTTON_TEXT = "🔀 Режим показа"
 VIEWMODE_BUTTON_TEXT = "👁 Я админ / Я пользователь"
 MERGE_BUTTON_TEXT = "🔗 Объединить карточки"
+TITLE_BUTTON_TEXT = "🏷 Название карточки"
 
 USER_DRAW_BUTTON = ReplyKeyboardMarkup(
     [
@@ -84,6 +85,7 @@ ADMIN_DRAW_BUTTON = ReplyKeyboardMarkup(
         [REMINDER_BUTTON_TEXT, VIEW_BUTTON_TEXT],
         [DELETE_BUTTON_TEXT, DELETE_ALL_BUTTON_TEXT],
         [EXPORT_BUTTON_TEXT, TEXT_CARD_BUTTON_TEXT],
+        [TITLE_BUTTON_TEXT],
         [VIEWMODE_BUTTON_TEXT],
         [MERGE_BUTTON_TEXT],
     ],
@@ -197,6 +199,17 @@ async def view_card_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     context.user_data["awaiting_view_number"] = True
     await update.message.reply_text("Пришли номер карточки, которую хочешь посмотреть.", reply_markup=DRAW_BUTTON)
+
+
+async def title_card_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_admin(update.effective_user.id):
+        return
+    context.user_data["awaiting_title_input"] = True
+    await update.message.reply_text(
+        "Пришли номер карточки и название через пробел, например: 1 Две точки\n"
+        "Название видно всем пользователям после номера карточки.",
+        reply_markup=DRAW_BUTTON,
+    )
 
 
 def parse_card_selection(text: str, valid_ids: list) -> list:
@@ -429,7 +442,7 @@ async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if card is None:
             await update.message.reply_text(f"Карточка #{card_id} не найдена.", reply_markup=DRAW_BUTTON)
             return
-        caption = f"Карточка #{card_id}"
+        caption = card_caption(card)
         file_ids = card_file_ids(card)
         for i, fid in enumerate(file_ids):
             is_last = i == len(file_ids) - 1
@@ -441,6 +454,23 @@ async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_photo(
                     photo=fid, caption=caption if is_last else None, reply_markup=DRAW_BUTTON if is_last else None
                 )
+        return
+    if _is_admin(update.effective_user.id) and context.user_data.get("awaiting_title_input"):
+        context.user_data["awaiting_title_input"] = False
+        text = (update.message.text or "").strip()
+        parts = text.split(maxsplit=1)
+        if len(parts) != 2 or not parts[0].isdigit() or not parts[1].strip():
+            await update.message.reply_text(
+                "Формат: номер и название через пробел, например: 1 Две точки. Попробуй ещё раз через кнопку.",
+                reply_markup=DRAW_BUTTON,
+            )
+            return
+        card_id, title = int(parts[0]), parts[1].strip()
+        ok = storage.set_title(card_id, title)
+        if ok:
+            await update.message.reply_text(f"Готово: {card_caption({'id': card_id, 'title': title})}.", reply_markup=DRAW_BUTTON)
+        else:
+            await update.message.reply_text(f"Карточка #{card_id} не найдена.", reply_markup=DRAW_BUTTON)
         return
     if _is_admin(update.effective_user.id) and context.user_data.get("awaiting_text_card"):
         context.user_data["awaiting_text_card"] = False
@@ -485,7 +515,7 @@ async def draw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Пока нет ни одной карточки в коллекции.", reply_markup=keyboard_for(user_id))
         return
     record_view(user_id)
-    caption = f"Карточка #{card['id']}" if _is_admin(update.effective_user.id) else None
+    caption = card_caption(card)
     kb = _fav_keyboard(card["id"])
     file_ids = card_file_ids(card)
     for i, fid in enumerate(file_ids):
@@ -599,13 +629,18 @@ async def favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if card is None:
             continue
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("Убрать из избранного", callback_data=f"unfav:{card_id}")]])
+        caption = card_caption(card)
         file_ids = card_file_ids(card)
         for i, fid in enumerate(file_ids):
             is_last = i == len(file_ids) - 1
             if card.get("kind") == "document":
-                await update.message.reply_document(document=fid, reply_markup=kb if is_last else None, protect_content=True)
+                await update.message.reply_document(
+                    document=fid, caption=caption if is_last else None, reply_markup=kb if is_last else None, protect_content=True
+                )
             else:
-                await update.message.reply_photo(photo=fid, reply_markup=kb if is_last else None, protect_content=True)
+                await update.message.reply_photo(
+                    photo=fid, caption=caption if is_last else None, reply_markup=kb if is_last else None, protect_content=True
+                )
     if len(ids) > 20:
         await update.message.reply_text(f"И ещё {len(ids) - 20} в избранном — вызови /favorites ещё раз позже.")
 
@@ -1231,7 +1266,7 @@ async def card_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if card is None:
         await update.message.reply_text(f"Карточка #{card_id} не найдена.")
         return
-    caption = f"Карточка #{card_id} ({len(card_file_ids(card))} стр.). Чтобы удалить: /delete {card_id}"
+    caption = f"{card_caption(card)} ({len(card_file_ids(card))} стр.). Чтобы удалить: /delete {card_id}"
     file_ids = card_file_ids(card)
     for i, fid in enumerate(file_ids):
         is_last = i == len(file_ids) - 1
@@ -1331,7 +1366,7 @@ async def send_daily_card(context: ContextTypes.DEFAULT_TYPE):
     file_ids = card_file_ids(card)
     for i, fid in enumerate(file_ids):
         is_last = i == len(file_ids) - 1
-        cap = "🌅 Карточка дня" if is_last else None
+        cap = f"🌅 Карточка дня — {card_caption(card)}" if is_last else None
         if card.get("kind") == "document":
             await context.bot.send_document(
                 chat_id=chat_id, document=fid, caption=cap, reply_markup=kb if is_last else None, protect_content=True
@@ -1470,6 +1505,7 @@ async def main():
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(STATS_BUTTON_TEXT)}$"), stats_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(REMINDER_BUTTON_TEXT)}$"), reminder_menu_cmd))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(VIEW_BUTTON_TEXT)}$"), view_card_prompt))
+    application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(TITLE_BUTTON_TEXT)}$"), title_card_prompt))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(DELETE_BUTTON_TEXT)}$"), delete_card_prompt))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(DELETE_ALL_BUTTON_TEXT)}$"), delete_all_prompt))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(EXPORT_BUTTON_TEXT)}$"), export_cmd))
