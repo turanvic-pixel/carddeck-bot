@@ -97,12 +97,24 @@ class CardStorage:
 
     def set_title(self, card_id: int, title: str) -> bool:
         """Задаёт/меняет название карточки, показывается после номера всем пользователям."""
-        card = next((c for c in self.cards if c["id"] == card_id), None)
-        if card is None:
-            return False
-        card["title"] = title
-        self._save(f"set title for card #{card_id}: {title!r}")
-        return True
+        updated, _ = self.set_titles({card_id: title})
+        return card_id in updated
+
+    def set_titles(self, mapping: dict) -> tuple:
+        """Задаёт названия сразу нескольким карточкам одним коммитом.
+        mapping: {card_id: title}. Возвращает (список обновлённых id, список не найденных id)."""
+        by_id = {c["id"]: c for c in self.cards}
+        updated, not_found = [], []
+        for card_id, title in mapping.items():
+            card = by_id.get(card_id)
+            if card is None:
+                not_found.append(card_id)
+            else:
+                card["title"] = title
+                updated.append(card_id)
+        if updated:
+            self._save(f"set titles for {len(updated)} cards")
+        return updated, not_found
 
     def find_duplicate(self, phash: str | None = None, content_hash: str | None = None):
         """Дубликатом считается только карточка с ТЕМ ЖЕ точным содержимым файла (content_hash).
