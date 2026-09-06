@@ -1,6 +1,7 @@
 import json
 import random
 import logging
+import datetime
 
 import imagehash
 from github import Github, Auth
@@ -333,23 +334,32 @@ class ReminderStore:
 
 
 class UserStore:
-    """Все, кто хоть раз писал боту — users.json в GitHub. Нужно для рассылок-уведомлений."""
+    """Все, кто хоть раз писал боту — users.json в GitHub. Нужно для рассылок-уведомлений
+    и статистики (сколько подписано всего, сколько заходило за сутки/неделю).
+    Формат: {user_id: "YYYY-MM-DD" последнего визита}. Старый формат (плоский список id
+    без дат) читается и на лету конвертируется — дата последнего визита для них неизвестна,
+    но подписчиками они остаются."""
 
     def __init__(self, github_token: str, repo_name: str, file_path: str = "users.json"):
         self.repo = Github(auth=Auth.Token(github_token)).get_user().get_repo(repo_name)
         self.file_path = file_path
-        self.data = []  # список user_id
+        self.data = {}  # {user_id_str: "YYYY-MM-DD" | None}
         self._sha = None
         self._load()
 
     def _load(self):
         try:
             f = self.repo.get_contents(self.file_path, ref=DATA_BRANCH)
-            self.data = json.loads(f.decoded_content.decode())
+            raw = json.loads(f.decoded_content.decode())
+            if isinstance(raw, list):
+                # старый формат — плоский список id без дат
+                self.data = {str(uid): None for uid in raw}
+            else:
+                self.data = raw
             self._sha = f.sha
         except Exception as e:
             logger.warning("users.json не найден, стартуем с пустого: %s", e)
-            self.data = []
+            self.data = {}
             self._sha = None
 
     def _save(self, commit_message: str):
@@ -361,14 +371,37 @@ class UserStore:
         self._sha = result["content"].sha
 
     def add(self, user_id: int) -> bool:
-        if user_id in self.data:
-            return False
-        self.data.append(user_id)
-        self._save(f"track new user {user_id}")
-        return True
+        """Совместимость: раньше просто добавляло в список. Теперь эквивалент touch()
+        для нового пользователя — возвращает True, только если пользователь реально новый."""
+        key = str(user_id)
+        is_new = key not in self.data
+        self.touch(user_id)
+        return is_new
+
+    def touch(self, user_id: int):
+        """Отмечает, что пользователь писал боту сегодня — сохраняет только если дата
+        реально изменилась (не коммитить на каждое сообщение одного и того же дня)."""
+        key = str(user_id)
+        today = datetime.date.today().isoformat()
+        if self.data.get(key) == today:
+            return
+        is_new = key not in self.data
+        self.data[key] = today
+        self._save(f"track new user {user_id}" if is_new else f"touch user {user_id} ({today})")
 
     def all(self) -> list:
-        return list(self.data)
+        return [int(uid) for uid in self.data]
+
+    def count_active_since(self, days: int) -> int:
+        """Сколько пользователей заходили за последние `days` дней (включая сегодня)."""
+        if days <= 0:
+            return 0
+        cutoff = datetime.date.today() - datetime.timedelta(days=days - 1)
+        count = 0
+        for last_seen in self.data.values():
+            if last_seen and datetime.date.fromisoformat(last_seen) >= cutoff:
+                count += 1
+        return count
 
 
 class MetaStore:

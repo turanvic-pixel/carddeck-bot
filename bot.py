@@ -150,7 +150,7 @@ def get_stats(user_id: int):
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total, day, week, month = get_stats(update.effective_user.id)
-    await update.message.reply_text(
+    text = (
         "📊 Твоя статистика просмотров:\n\n"
         f"Всего: {total}\n"
         f"За день: {day}\n"
@@ -158,6 +158,15 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"За месяц: {month}\n\n"
         f"Карточек в боте всего: {storage.count()}"
     )
+    if _is_admin(update.effective_user.id):
+        text += (
+            "\n\n👑 Статистика бота (админ):\n"
+            f"Подписано всего: {len(users.all())}\n"
+            f"Заходили сегодня: {users.count_active_since(1)}\n"
+            f"Заходили за 7 дней: {users.count_active_since(7)}\n"
+            f"Заходили за 30 дней: {users.count_active_since(30)}"
+        )
+    await update.message.reply_text(text)
 
 
 async def track_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
