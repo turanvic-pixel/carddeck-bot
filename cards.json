@@ -708,6 +708,11 @@
       "kind": "photo",
       "phash": "eef0a50bf007d84e",
       "content_hash": "99d6c5819cea8da8c95143f1d3afca8af49f6c3cbe7f66f9b9602fcf3bab678d"
+    },
+    {
+      "id": 111,
+      "file_id": "AgACAgIAAxkBAAIOZmqdd_WFBdu0DqspFqNU5zw9Q55bAAJkG2sb4SPpSKLK7P1TUHLlAQADAgADeQADPQQ",
+      "kind": "photo"
     }
   ]
 }
