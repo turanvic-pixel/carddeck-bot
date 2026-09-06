@@ -738,6 +738,13 @@
       "id": 116,
       "file_id": "AgACAgIAAxkBAAIOa2qdd_Wq65-zEx-81YrJPclty4E4AAJpG2sb4SPpSBK5C9TbuD44AQADAgADeQADPQQ",
       "kind": "photo"
+    },
+    {
+      "id": 117,
+      "file_id": "AgACAgIAAxkBAAIOZWqdd_Xukb6GQ4xbbydQltISSUCnAAJlG2sb4SPpSCiBnooRJrVmAQADAgADeQADPQQ",
+      "kind": "photo",
+      "phash": "d5a8d4a85eb93385",
+      "content_hash": "1348be12bfb8a33f67f8ba13c1d7cba3caa53d21e90589a18fefce8e8ac9ba5f"
     }
   ]
 }
