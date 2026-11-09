@@ -1253,37 +1253,6 @@ async def hash_missing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, reply_markup=DRAW_BUTTON)
 
 
-async def hash_missing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _is_admin(update.effective_user.id):
-        return
-    missing = [c for c in storage.cards if not c.get("phash")]
-    if not missing:
-        await update.message.reply_text("У всех карточек уже есть хэш для проверки дублей.")
-        return
-    await update.message.reply_text(f"Считаю хэш для {len(missing)} карточек...")
-    fixed = 0
-    failed = []
-    for card in missing:
-        try:
-            tg_file = await context.bot.get_file(card["file_id"])
-            raw = await tg_file.download_as_bytearray()
-            phash = compute_phash(bytes(raw))
-            if phash:
-                card["phash"] = phash
-                fixed += 1
-            else:
-                failed.append(card["id"])
-        except Exception as e:
-            logger.warning("Не удалось посчитать хэш для карточки #%s: %s", card["id"], e)
-            failed.append(card["id"])
-    if fixed > 0:
-        storage.persist(f"backfill phash for {fixed} cards")
-    msg = f"Готово! Хэш посчитан для {fixed} карточек."
-    if failed:
-        msg += f" Не получилось: {failed}."
-    await update.message.reply_text(msg, reply_markup=DRAW_BUTTON)
-
-
 async def admin_ignore_non_admin_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if _is_admin(update.effective_user.id):
         return
@@ -1524,7 +1493,6 @@ async def main():
     application.add_handler(CommandHandler("whoami", whoami))
     application.add_handler(CommandHandler("export", export_cmd))
     application.add_handler(CommandHandler("reprocess", reprocess_cmd))
-    application.add_handler(CommandHandler("hash_missing", hash_missing_cmd))
     application.add_handler(CommandHandler("hash_missing", hash_missing_cmd))
     application.add_handler(CommandHandler("favorites", favorites_cmd))
     application.add_handler(CommandHandler("remind_on", remind_on_cmd))
